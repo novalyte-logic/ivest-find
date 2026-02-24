@@ -1,0 +1,390 @@
+import { useState, useEffect } from 'react';
+import { Investor } from '../data/investors';
+import { X, Save, Edit2, Trash2, Plus, Tag, Linkedin, ExternalLink } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface InvestorDetailModalProps {
+  investor: Investor | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (updatedInvestor: Investor) => void;
+  onDraftOutreach: (investor: Investor) => void;
+}
+
+const CONTACT_PREFERENCES = ['Email', 'LinkedIn', 'Twitter / X', 'Warm Intro', 'Other'];
+
+export function InvestorDetailModal({ 
+  investor, 
+  isOpen, 
+  onClose, 
+  onSave,
+  onDraftOutreach 
+}: InvestorDetailModalProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedInvestor, setEditedInvestor] = useState<Investor | null>(null);
+  const [newTag, setNewTag] = useState('');
+
+  useEffect(() => {
+    if (investor) {
+      setEditedInvestor({ ...investor });
+      setIsEditing(false);
+      setNewTag('');
+    }
+  }, [investor]);
+
+  if (!investor || !editedInvestor) return null;
+
+  const handleSave = () => {
+    onSave(editedInvestor);
+    setIsEditing(false);
+  };
+
+  const handleChange = (field: keyof Investor, value: any) => {
+    setEditedInvestor(prev => prev ? { ...prev, [field]: value } : null);
+  };
+
+  const handleArrayChange = (field: 'focus' | 'industryExpertise' | 'notableInvestments', value: string) => {
+    const array = value.split(',').map(s => s.trim());
+    handleChange(field, array);
+  };
+
+  const addTag = () => {
+    if (newTag.trim() && !editedInvestor.tags.includes(newTag.trim())) {
+      const updatedTags = [...editedInvestor.tags, newTag.trim()];
+      handleChange('tags', updatedTags);
+      setNewTag('');
+      // Auto-save tags for better UX
+      if (!isEditing) {
+        onSave({ ...editedInvestor, tags: updatedTags });
+      }
+    }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    const updatedTags = editedInvestor.tags.filter(t => t !== tagToRemove);
+    handleChange('tags', updatedTags);
+    if (!isEditing) {
+      onSave({ ...editedInvestor, tags: updatedTags });
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40"
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+          >
+            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl pointer-events-auto flex flex-col">
+              
+              {/* Header */}
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-start sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
+                <div className="flex items-center gap-4">
+                  <img 
+                    src={editedInvestor.imageUrl} 
+                    alt={editedInvestor.name} 
+                    className="w-16 h-16 rounded-full object-cover border-2 border-zinc-800"
+                  />
+                  <div>
+                    {isEditing ? (
+                      <input 
+                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xl font-bold text-white w-full mb-1"
+                        value={editedInvestor.name}
+                        onChange={(e) => handleChange('name', e.target.value)}
+                      />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-2xl font-bold text-white">{investor.name}</h2>
+                        {investor.linkedinUrl && (
+                          <a 
+                            href={investor.linkedinUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-blue-400 hover:text-blue-300 transition-colors"
+                          >
+                            <Linkedin size={20} />
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    
+                    {isEditing ? (
+                      <input 
+                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-400 w-full"
+                        value={editedInvestor.role}
+                        onChange={(e) => handleChange('role', e.target.value)}
+                      />
+                    ) : (
+                      <p className="text-zinc-400">{investor.role} {investor.firm && `at ${investor.firm}`}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {isEditing ? (
+                    <button 
+                      onClick={handleSave}
+                      className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                      <Save size={18} /> Save
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setIsEditing(true)}
+                      className="p-2 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 transition-colors flex items-center gap-2"
+                    >
+                      <Edit2 size={18} /> Edit
+                    </button>
+                  )}
+                  <button 
+                    onClick={onClose}
+                    className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-8 space-y-8">
+                
+                {/* Tags Section */}
+                <section>
+                  <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <Tag size={14} /> Tags
+                  </h3>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {editedInvestor.tags.map(tag => (
+                      <span key={tag} className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm border border-purple-500/30 flex items-center gap-2">
+                        {tag}
+                        <button onClick={() => removeTag(tag)} className="hover:text-white">
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text"
+                      placeholder="Add a tag (e.g., 'Met in person')"
+                      className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-purple-500 w-full max-w-xs"
+                      value={newTag}
+                      onChange={(e) => setNewTag(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addTag()}
+                    />
+                    <button 
+                      onClick={addTag}
+                      disabled={!newTag.trim()}
+                      className="p-1.5 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 disabled:opacity-50"
+                    >
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                </section>
+
+                {/* Bio */}
+                <section>
+                  <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Biography</h3>
+                  {isEditing ? (
+                    <textarea 
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-zinc-200 min-h-[100px]"
+                      value={editedInvestor.bio}
+                      onChange={(e) => handleChange('bio', e.target.value)}
+                    />
+                  ) : (
+                    <p className="text-zinc-300 leading-relaxed">{investor.bio}</p>
+                  )}
+                </section>
+
+                {/* Investment Thesis */}
+                <section>
+                  <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Investment Thesis</h3>
+                  {isEditing ? (
+                    <textarea 
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-zinc-200"
+                      value={editedInvestor.investmentThesis}
+                      onChange={(e) => handleChange('investmentThesis', e.target.value)}
+                    />
+                  ) : (
+                    <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl italic text-zinc-300">
+                      "{investor.investmentThesis}"
+                    </div>
+                  )}
+                </section>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Focus Areas */}
+                  <section>
+                    <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Focus Areas</h3>
+                    {isEditing ? (
+                      <input 
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                        value={editedInvestor.focus.join(', ')}
+                        onChange={(e) => handleArrayChange('focus', e.target.value)}
+                      />
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {investor.focus.map(tag => (
+                          <span key={tag} className="px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-md text-sm">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Industry Expertise */}
+                  <section>
+                    <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Industry Expertise</h3>
+                    {isEditing ? (
+                      <input 
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                        value={editedInvestor.industryExpertise.join(', ')}
+                        onChange={(e) => handleArrayChange('industryExpertise', e.target.value)}
+                      />
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {investor.industryExpertise.map(tag => (
+                          <span key={tag} className="px-2 py-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-md text-sm">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Notable Investments */}
+                  <section>
+                    <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Notable Investments</h3>
+                    {isEditing ? (
+                      <input 
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                        value={editedInvestor.notableInvestments.join(', ')}
+                        onChange={(e) => handleArrayChange('notableInvestments', e.target.value)}
+                      />
+                    ) : (
+                      <ul className="list-disc list-inside text-zinc-300 space-y-1">
+                        {investor.notableInvestments.map(inv => (
+                          <li key={inv}>{inv}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+
+                  {/* Contact & Details */}
+                  <section className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Location</h3>
+                      {isEditing ? (
+                        <input 
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                          value={editedInvestor.location}
+                          onChange={(e) => handleChange('location', e.target.value)}
+                        />
+                      ) : (
+                        <p className="text-zinc-300">{investor.location}</p>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Investment Range</h3>
+                      {isEditing ? (
+                        <input 
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                          value={editedInvestor.investmentRange}
+                          onChange={(e) => handleChange('investmentRange', e.target.value)}
+                        />
+                      ) : (
+                        <p className="text-zinc-300">{investor.investmentRange}</p>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Preferred Contact</h3>
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <select
+                            className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 flex-1"
+                            value={CONTACT_PREFERENCES.includes(editedInvestor.contactPreference) ? editedInvestor.contactPreference : 'Other'}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val !== 'Other') handleChange('contactPreference', val);
+                              else handleChange('contactPreference', '');
+                            }}
+                          >
+                            {CONTACT_PREFERENCES.map(pref => (
+                              <option key={pref} value={pref}>{pref}</option>
+                            ))}
+                          </select>
+                          {(!CONTACT_PREFERENCES.includes(editedInvestor.contactPreference) || editedInvestor.contactPreference === '') && (
+                            <input 
+                              className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200 flex-1"
+                              placeholder="Custom preference..."
+                              value={editedInvestor.contactPreference}
+                              onChange={(e) => handleChange('contactPreference', e.target.value)}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-zinc-300">{investor.contactPreference}</p>
+                      )}
+                    </div>
+                    
+                    {/* LinkedIn URL - New Field */}
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">LinkedIn Profile</h3>
+                      {isEditing ? (
+                        <input 
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                          placeholder="https://linkedin.com/in/..."
+                          value={editedInvestor.linkedinUrl || ''}
+                          onChange={(e) => handleChange('linkedinUrl', e.target.value)}
+                        />
+                      ) : (
+                        investor.linkedinUrl ? (
+                          <a 
+                            href={investor.linkedinUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-2"
+                          >
+                            <Linkedin size={16} />
+                            <span className="truncate">{investor.linkedinUrl}</span>
+                            <ExternalLink size={12} />
+                          </a>
+                        ) : (
+                          <p className="text-zinc-500 italic">No LinkedIn profile added</p>
+                        )
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+              </div>
+
+              {/* Footer Actions */}
+              <div className="p-6 border-t border-zinc-800 bg-zinc-900/30 flex justify-end">
+                <button
+                  onClick={() => onDraftOutreach(investor)}
+                  className="px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 transition-colors shadow-lg shadow-white/10"
+                >
+                  Draft Outreach Email
+                </button>
+              </div>
+
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
