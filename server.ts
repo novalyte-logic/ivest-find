@@ -7,13 +7,14 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
+  const HOST = process.env.HOST || "0.0.0.0";
 
   let resendClient: Resend | null = null;
 
   const getResend = () => {
     if (!resendClient) {
-      const apiKey = process.env.RESEND_API_KEY || "re_FXPLjN5d_DpDbm2nd7xyj8trMj1Q5GEoq";
+      const apiKey = process.env.RESEND_API_KEY;
       if (!apiKey) {
         throw new Error("RESEND_API_KEY is not configured in environment variables.");
       }
@@ -44,8 +45,8 @@ async function startServer() {
 
       if (error) {
         console.error("Resend error:", JSON.stringify(error, null, 2));
-        const errorMessage = typeof error === 'object' && error !== null && 'message' in error 
-          ? (error as any).message 
+        const errorMessage = typeof error === "object" && error !== null && "message" in error
+          ? (error as { message: string }).message
           : JSON.stringify(error);
         return res.status(400).json({ error: errorMessage });
       }
@@ -71,8 +72,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    const displayHost = HOST === "0.0.0.0" ? "localhost" : HOST;
+    console.log(`Server running on http://${displayHost}:${PORT}`);
   });
 }
 
