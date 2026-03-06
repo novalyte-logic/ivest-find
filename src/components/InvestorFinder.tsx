@@ -246,7 +246,6 @@ export function InvestorFinder({
   const handleOpenSmartSearch = (query: string) => {
     setWebSearchQuery(query);
     setShowWebSearchModal(true);
-    void handleWebSearch(query);
   };
 
   const handleWebSearch = async (queryOverride?: string) => {
@@ -749,7 +748,7 @@ export function InvestorFinder({
                   {suggestedSearchQueries.slice(0, 6).map((query) => (
                     <button
                       key={query}
-                      onClick={() => handleWebSearch(query)}
+                      onClick={() => setWebSearchQuery(query)}
                       className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
                     >
                       {query}
