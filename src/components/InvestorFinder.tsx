@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { initialInvestors, Investor } from '../data/investors';
+import { initialInvestors, Investor, isLegacyMockInvestor } from '../data/investors';
 import { InvestorCard } from './InvestorCard';
 import { InvestorDetailModal } from './InvestorDetailModal';
 import { NetworkGraph } from './NetworkGraph';
@@ -12,8 +12,27 @@ import { Type } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 import { clientGemini as ai } from '../lib/env';
 import { buildVaultPromptContext, countVaultKeywordMatches, getVaultInvestorKeywords, loadVaultData, subscribeToVaultChanges, VaultData } from '../lib/vault';
+import { InvestorAvatar } from './InvestorAvatar';
 
 type SortOption = 'match' | 'rangeAsc' | 'rangeDesc' | 'expertiseMatch';
+const INVESTOR_STORAGE_KEY = 'novalyte_live_investors';
+
+function dedupeInvestors(investors: Investor[]): Investor[] {
+  const seen = new Set<string>();
+
+  return investors.filter((investor) => {
+    const key =
+      investor.linkedinUrl?.trim().toLowerCase() ||
+      `${investor.name.trim().toLowerCase()}::${(investor.firm || '').trim().toLowerCase()}::${investor.location.trim().toLowerCase()}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
 
 interface InvestorFinderProps {
   onDraftOutreach: (investor: Investor) => void;
@@ -22,7 +41,26 @@ interface InvestorFinderProps {
 }
 
 export function InvestorFinder({ onDraftOutreach, onToggleInterested, interestedIds }: InvestorFinderProps) {
-  const [investors, setInvestors] = useState<Investor[]>(initialInvestors);
+  const [investors, setInvestors] = useState<Investor[]>(() => {
+    if (typeof window === 'undefined') {
+      return initialInvestors;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(INVESTOR_STORAGE_KEY);
+      if (!saved) {
+        return initialInvestors;
+      }
+
+      const parsed = JSON.parse(saved) as Investor[];
+      return dedupeInvestors(
+        parsed.filter((investor) => !isLegacyMockInvestor(investor)),
+      );
+    } catch (error) {
+      console.error('Failed to parse saved investors', error);
+      return initialInvestors;
+    }
+  });
   const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
   const [vaultData, setVaultData] = useState<VaultData>(() => loadVaultData());
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,6 +84,17 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
     setVaultData(loadVaultData());
     return subscribeToVaultChanges(setVaultData);
   }, []);
+
+  useEffect(() => {
+    const cleaned = dedupeInvestors(
+      investors.filter((investor) => !isLegacyMockInvestor(investor)),
+    );
+    window.localStorage.setItem(INVESTOR_STORAGE_KEY, JSON.stringify(cleaned));
+
+    if (cleaned.length !== investors.length) {
+      setInvestors(cleaned);
+    }
+  }, [investors]);
 
   // Derived lists for filter dropdowns
   const allFocusAreas = useMemo(() => Array.from(new Set(investors.flatMap(i => i.focus))), [investors]);
@@ -157,8 +206,9 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
         3. Use the company source-of-truth instead of generic health tech assumptions.
         4. Do not invent investor details. If something cannot be supported from public info, omit it.
         5. Return a JSON array of investors with these fields:
-        name, role, firm, bio, focus (array), location, investmentRange, investmentThesis, stage (Pre-Seed, Seed, Series A, or Late Stage), linkedinUrl.
-        6. Keep each bio and thesis factual and concise.`,
+        name, role, firm, bio, focus (array), location, investmentRange, investmentThesis, stage (Pre-Seed, Seed, Series A, or Late Stage), linkedinUrl, email.
+        6. Only include email if it is explicitly public. Otherwise return an empty string.
+        7. Keep each bio and thesis factual and concise.`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
@@ -176,7 +226,8 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                 investmentRange: { type: Type.STRING },
                 investmentThesis: { type: Type.STRING },
                 stage: { type: Type.STRING },
-                linkedinUrl: { type: Type.STRING }
+                linkedinUrl: { type: Type.STRING },
+                email: { type: Type.STRING }
               },
               required: ["name", "role", "bio", "focus", "location", "investmentRange", "investmentThesis", "stage"]
             }
@@ -188,10 +239,11 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
       const formattedResults = results.map((res: any, index: number) => ({
         ...res,
         id: `web-${Date.now()}-${index}`,
-        imageUrl: `https://images.unsplash.com/photo-${1500000000000 + index}?auto=format&fit=crop&q=80&w=200&h=200`,
+        imageUrl: undefined,
         industryExpertise: res.focus,
-        contactPreference: 'Email',
-        tags: ['Web Found']
+        contactPreference: res.email ? 'Email' : 'Research First',
+        tags: ['Web Found'],
+        email: res.email || undefined,
       }));
       setWebSearchResults(formattedResults);
     } catch (error) {
@@ -204,7 +256,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
   const handleImportInvestor = (investor: Investor) => {
     setImportingIds(prev => new Set(prev).add(investor.id));
     setTimeout(() => {
-      setInvestors(prev => [investor, ...prev]);
+      setInvestors(prev => dedupeInvestors([investor, ...prev]));
       setWebSearchResults(prev => prev.filter(i => i.id !== investor.id));
       setImportingIds(prev => {
         const next = new Set(prev);
@@ -396,7 +448,11 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
 
       {filteredInvestors.length === 0 && (
         <div className="text-center py-20">
-          <p className="text-zinc-500">No investors found matching your search.</p>
+          <p className="text-zinc-500">
+            {investors.length === 0
+              ? 'No live investors saved yet. Use Web Search to find and import real investors.'
+              : 'No investors found matching your search.'}
+          </p>
         </div>
       )}
 
@@ -480,11 +536,18 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                     {webSearchResults.map((inv) => (
                       <div key={inv.id} className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl flex items-start justify-between group">
                         <div className="flex gap-4">
-                          <img src={inv.imageUrl} className="w-12 h-12 rounded-full object-cover" />
+                          <InvestorAvatar
+                            imageUrl={inv.imageUrl}
+                            name={inv.name}
+                            className="h-12 w-12 object-cover"
+                          />
                           <div>
                             <h4 className="font-bold text-white">{inv.name}</h4>
                             <p className="text-xs text-blue-400 mb-1">{inv.role} {inv.firm ? `@ ${inv.firm}` : ''}</p>
                             <p className="text-xs text-zinc-400 line-clamp-2 max-w-md">{inv.bio}</p>
+                            {inv.email ? (
+                              <p className="mt-1 text-[11px] text-emerald-400">{inv.email}</p>
+                            ) : null}
                             <div className="flex flex-wrap gap-1 mt-2">
                               {inv.focus.slice(0, 3).map(f => (
                                 <span key={f} className="px-2 py-0.5 bg-zinc-800 text-[10px] text-zinc-500 rounded-full">{f}</span>

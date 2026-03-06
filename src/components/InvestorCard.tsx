@@ -1,9 +1,10 @@
 import { MouseEvent } from 'react';
 import { Investor } from '../data/investors';
-import { MapPin, DollarSign, ArrowRight, Sparkles, Clock, Star } from 'lucide-react';
+import { MapPin, DollarSign, Sparkles, Clock, Star } from 'lucide-react';
 import { motion } from 'motion/react';
 import { calculateMatchScore } from '../lib/matching';
 import { VaultData } from '../lib/vault';
+import { InvestorAvatar } from './InvestorAvatar';
 
 interface InvestorCardProps {
   investor: Investor;
@@ -42,10 +43,10 @@ export function InvestorCard({ investor, onSelect, onAddTag, onToggleInterested,
       
       <div className="relative z-10 flex items-start justify-between gap-4 mb-4">
         <div className="flex items-center gap-4">
-          <img 
-            src={investor.imageUrl} 
-            alt={investor.name} 
-            className="w-14 h-14 rounded-full object-cover border-2 border-zinc-800 group-hover:border-zinc-600 transition-colors"
+          <InvestorAvatar
+            imageUrl={investor.imageUrl}
+            name={investor.name}
+            className="h-14 w-14 border-2 border-zinc-800 object-cover group-hover:border-zinc-600 transition-colors"
           />
           <div>
             <h3 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">

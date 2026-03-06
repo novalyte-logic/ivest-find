@@ -2,6 +2,7 @@ import { Investor } from '../data/investors';
 import { calculateMatchScore } from '../lib/matching';
 import { VaultData } from '../lib/vault';
 import { Sparkles, ArrowRight } from 'lucide-react';
+import { InvestorAvatar } from './InvestorAvatar';
 
 interface TopMatchesProps {
   investors: Investor[];
@@ -14,6 +15,20 @@ export function TopMatches({ investors, onSelect, vaultData }: TopMatchesProps) 
   const topInvestors = [...investors]
     .sort((a, b) => calculateMatchScore(b, vaultData).score - calculateMatchScore(a, vaultData).score)
     .slice(0, 5);
+
+  if (topInvestors.length === 0) {
+    return (
+      <div className="mb-8 rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/40 p-6">
+        <div className="mb-2 flex items-center gap-2">
+          <Sparkles className="text-yellow-400" size={20} />
+          <h3 className="text-lg font-bold text-white">Top Matches</h3>
+        </div>
+        <p className="text-sm text-zinc-500">
+          No investor records are saved yet. Use Web Search to pull in live investors, then import the ones you want to work.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 mb-8">
@@ -39,7 +54,11 @@ export function TopMatches({ investors, onSelect, vaultData }: TopMatchesProps) 
               </div>
               
               <div className="flex items-center gap-3 mb-3">
-                <img src={investor.imageUrl} alt={investor.name} className="w-8 h-8 rounded-full" />
+                <InvestorAvatar
+                  imageUrl={investor.imageUrl}
+                  name={investor.name}
+                  className="h-8 w-8 object-cover"
+                />
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-white truncate">{investor.name}</p>
                   <p className="text-[10px] text-zinc-500 truncate">{investor.firm}</p>

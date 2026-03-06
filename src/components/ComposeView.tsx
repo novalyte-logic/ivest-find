@@ -8,6 +8,7 @@ import { Investor } from '../data/investors';
 import { Email } from '../data/emails';
 import { clientGemini as ai } from '../lib/env';
 import { buildVaultPromptContext, loadVaultData } from '../lib/vault';
+import { InvestorAvatar } from './InvestorAvatar';
 
 interface ComposeViewProps {
   onSend?: (email: Partial<Email> & { scheduledFor?: string }) => void;
@@ -19,21 +20,21 @@ interface ComposeViewProps {
 const EMAIL_TEMPLATES = [
   {
     id: 'intro',
-    name: 'Cold Intro (Traction Focused)',
+    name: 'Cold Intro',
     subject: 'Novalyte AI x [Firm Name] - Pre-seed Round',
-    body: "Hi [Investor Name],<br><br>I've been following [Firm Name]'s investments in [Industry] and noticed your focus on [Specific Area].<br><br>I'm the founder of Novalyte AI. We've developed a proprietary diagnostic engine with 99% accuracy that's already live and generating revenue. We're currently raising a pre-seed round to scale our user base.<br><br>Would you be open to a 15-minute intro call next week?<br><br>Best,<br>[My Name]"
+    body: "Hi [Investor Name],<br><br>I've been following [Firm Name]'s work in [Industry] and thought there may be a fit with your focus on [Specific Area].<br><br>I'm the founder of Novalyte AI. We're currently raising and I would value the chance to share why this may fit your thesis.<br><br>Would you be open to a short intro call next week?<br><br>Best,<br>[My Name]"
   },
   {
     id: 'follow-up',
     name: 'Quick Follow-up',
     subject: 'Re: Novalyte AI - Pre-seed Round',
-    body: "Hi [Investor Name],<br><br>Just wanted to circle back on my previous note. We just secured another pilot program since my last email, further validating our market-ready diagnostic engine.<br><br>I'd love to share more about our growth plans if you have a moment.<br><br>Best,<br>[My Name]"
+    body: "Hi [Investor Name],<br><br>Just wanted to circle back on my earlier note in case it got buried. I still think there could be a fit between your focus and what we're building at Novalyte AI.<br><br>If useful, I can send a short overview or make time for a quick intro.<br><br>Best,<br>[My Name]"
   },
   {
     id: 'update',
     name: 'Monthly Progress Update',
     subject: 'Novalyte AI: Monthly Update - [Month] [Year]',
-    body: "Hi [Investor Name],<br><br>I wanted to share a quick update on Novalyte AI's progress this month:<br><br>- <b>Traction:</b> [Metric 1]<br>- <b>Product:</b> [Metric 2]<br>- <b>Team:</b> [Metric 3]<br><br>We're moving fast and would love to keep you in the loop as we scale.<br><br>Best,<br>[My Name]"
+    body: "Hi [Investor Name],<br><br>I wanted to share a quick update on Novalyte AI's progress this month:<br><br>- <b>Traction:</b> [Metric 1]<br>- <b>Product:</b> [Metric 2]<br>- <b>Team:</b> [Metric 3]<br><br>If helpful, I can send a fuller update or make time for a quick intro.<br><br>Best,<br>[My Name]"
   }
 ];
 
@@ -102,7 +103,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
   useEffect(() => {
     if (initialInvestor) {
       setSelectedInvestor(initialInvestor);
-      setTo(initialInvestor.contactPreference === 'Email' ? 'email@example.com' : initialInvestor.name);
+      setTo(initialInvestor.email || '');
       setSubject(`Intro: Novalyte AI x ${initialInvestor.firm || initialInvestor.name}`);
     }
     
@@ -120,7 +121,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
       if (saved && !initialInvestor && !initialDraft) {
         try {
           const parsed = JSON.parse(saved);
-          setTo(parsed.to || '');
+          setTo(parsed.to === 'email@example.com' ? '' : (parsed.to || ''));
           setSubject(parsed.subject || '');
           setBody(parsed.body || '');
           if (parsed.selectedInvestorId) {
@@ -289,12 +290,12 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
 
   const filteredInvestors = interestedInvestors.filter(inv => 
     inv.name.toLowerCase().includes(investorSearch.toLowerCase()) ||
-    inv.firm.toLowerCase().includes(investorSearch.toLowerCase())
+    (inv.firm || '').toLowerCase().includes(investorSearch.toLowerCase())
   );
 
   const selectInvestor = (inv: Investor) => {
     setSelectedInvestor(inv);
-    setTo(inv.contactPreference === 'Email' ? 'email@example.com' : inv.name);
+    setTo(inv.email || '');
     setSubject(`Intro: Novalyte AI x ${inv.firm || inv.name}`);
     setShowInvestorPicker(false);
   };
@@ -307,7 +308,11 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
           <h2 className="text-xl font-bold text-white">Compose</h2>
           {selectedInvestor && (
             <div className="flex items-center gap-2 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
-              <img src={selectedInvestor.imageUrl} alt="" className="w-4 h-4 rounded-full" referrerPolicy="no-referrer" />
+              <InvestorAvatar
+                imageUrl={selectedInvestor.imageUrl}
+                name={selectedInvestor.name}
+                className="h-4 w-4 object-cover"
+              />
               <span className="text-xs font-medium text-blue-400">{selectedInvestor.name}</span>
               <button onClick={() => setSelectedInvestor(null)} className="text-blue-400 hover:text-white">
                 <X size={12} />
@@ -380,7 +385,11 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
                           onClick={() => selectInvestor(inv)}
                           className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800 transition-colors text-left border-b border-zinc-800/50 last:border-0"
                         >
-                          <img src={inv.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover" referrerPolicy="no-referrer" />
+                          <InvestorAvatar
+                            imageUrl={inv.imageUrl}
+                            name={inv.name}
+                            className="h-8 w-8 object-cover"
+                          />
                           <div>
                             <p className="text-sm font-bold text-white">{inv.name}</p>
                             <p className="text-[10px] text-zinc-500">{inv.firm}</p>

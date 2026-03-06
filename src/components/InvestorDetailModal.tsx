@@ -3,6 +3,7 @@ import { Investor } from '../data/investors';
 import { X, Save, Edit2, Trash2, Plus, Tag, Linkedin, ExternalLink, Sparkles, Search, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clientGemini as ai } from '../lib/env';
+import { InvestorAvatar } from './InvestorAvatar';
 
 interface InvestorDetailModalProps {
   investor: Investor | null;
@@ -148,10 +149,10 @@ export function InvestorDetailModal({
               {/* Header */}
               <div className="p-4 md:p-6 border-b border-zinc-800 flex justify-between items-start sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
                 <div className="flex items-center gap-3 md:gap-4">
-                  <img 
-                    src={editedInvestor.imageUrl} 
-                    alt={editedInvestor.name} 
-                    className="w-12 h-12 md:w-16 md:h-16 rounded-full object-cover border-2 border-zinc-800"
+                  <InvestorAvatar
+                    imageUrl={editedInvestor.imageUrl}
+                    name={editedInvestor.name}
+                    className="h-12 w-12 border-2 border-zinc-800 object-cover md:h-16 md:w-16"
                   />
                   <div>
                     {isEditing ? (
@@ -420,6 +421,21 @@ export function InvestorDetailModal({
                         </div>
                       ) : (
                         <p className="text-zinc-300">{investor.contactPreference}</p>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Email</h3>
+                      {isEditing ? (
+                        <input
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+                          placeholder="investor@firm.com"
+                          value={editedInvestor.email || ''}
+                          onChange={(e) => handleChange('email', e.target.value)}
+                        />
+                      ) : investor.email ? (
+                        <p className="text-zinc-300">{investor.email}</p>
+                      ) : (
+                        <p className="text-zinc-500 italic">No public email saved</p>
                       )}
                     </div>
                     

@@ -63,7 +63,7 @@ export function EmailDetail({ email, onBack, onDelete, onReply }: EmailDetailPro
                   <span className="text-xs text-zinc-500">&lt;{email.from}&gt;</span>
                 </div>
                 <div className="text-xs text-zinc-500">
-                  to {email.to === 'me@novalyte.ai' ? 'me' : email.to}
+                  to {email.to}
                 </div>
               </div>
             </div>

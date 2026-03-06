@@ -188,8 +188,7 @@ async function startServer() {
         const fromAddress =
           process.env.SMTP_FROM_EMAIL ||
           process.env.SMTP_USER ||
-          process.env.RESEND_FROM_EMAIL ||
-          "onboarding@resend.dev";
+          process.env.RESEND_FROM_EMAIL;
         const replyToAddress =
           process.env.SMTP_REPLY_TO ||
           process.env.SMTP_FROM_EMAIL ||
@@ -208,12 +207,24 @@ async function startServer() {
       }
 
       const resend = getResend();
+      const resendFromAddress =
+        process.env.RESEND_FROM_EMAIL ||
+        process.env.SMTP_FROM_EMAIL ||
+        process.env.SMTP_USER;
+
+      if (!resendFromAddress) {
+        throw new Error("A sender email address is not configured.");
+      }
+
       const { data, error } = await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+        from: resendFromAddress,
         to: [to],
         subject: subject,
         html: body,
-        replyTo: "jamil@novalyte.io",
+        replyTo:
+          process.env.SMTP_REPLY_TO ||
+          process.env.RESEND_FROM_EMAIL ||
+          undefined,
       });
 
       if (error) {

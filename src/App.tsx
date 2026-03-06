@@ -7,8 +7,9 @@ import { InvestorDetailModal } from './components/InvestorDetailModal';
 import { ComposeView } from './components/ComposeView';
 import { EmailDetail } from './components/EmailDetail';
 import { AccessGate } from './components/AccessGate';
-import { initialEmails, Email } from './data/emails';
-import { Investor } from './data/investors';
+import { initialEmails, Email, isLegacyMockEmail } from './data/emails';
+import { Investor, isLegacyMockInvestor } from './data/investors';
+import { InvestorAvatar } from './components/InvestorAvatar';
 import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -64,7 +65,12 @@ export default function App() {
     const savedInvestors = localStorage.getItem('interested_investors');
     if (savedInvestors) {
       try {
-        setInterestedInvestors(JSON.parse(savedInvestors));
+        const parsed = JSON.parse(savedInvestors) as Investor[];
+        const cleaned = parsed.filter((investor) => !isLegacyMockInvestor(investor));
+        setInterestedInvestors(cleaned);
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem('interested_investors', JSON.stringify(cleaned));
+        }
       } catch (e) {
         console.error("Failed to parse interested investors", e);
       }
@@ -73,7 +79,12 @@ export default function App() {
     const savedEmails = localStorage.getItem('novalyte_emails');
     if (savedEmails) {
       try {
-        setEmails(JSON.parse(savedEmails));
+        const parsed = JSON.parse(savedEmails) as Email[];
+        const cleaned = parsed.filter((email) => !isLegacyMockEmail(email));
+        setEmails(cleaned);
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem('novalyte_emails', JSON.stringify(cleaned));
+        }
       } catch (e) {
         console.error("Failed to parse emails", e);
       }
@@ -190,7 +201,7 @@ export default function App() {
       setToast({ 
         message: email.scheduledFor 
           ? `Email scheduled for ${new Date(email.scheduledFor).toLocaleString()}!` 
-          : 'Email sent successfully via Resend!', 
+          : 'Email sent successfully.', 
         type: 'success' 
       });
       
@@ -304,11 +315,10 @@ export default function App() {
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center gap-4">
-                          <img 
-                            src={investor.imageUrl} 
-                            alt={investor.name}
-                            className="w-12 h-12 rounded-full object-cover border-2 border-zinc-800"
-                            referrerPolicy="no-referrer"
+                          <InvestorAvatar
+                            imageUrl={investor.imageUrl}
+                            name={investor.name}
+                            className="h-12 w-12 border-2 border-zinc-800 object-cover"
                           />
                           <div>
                             <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors">{investor.name}</h3>
