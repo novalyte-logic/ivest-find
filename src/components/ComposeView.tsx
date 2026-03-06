@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Send, Sparkles, Paperclip, Trash2, ThumbsUp, ThumbsDown, Loader2, FileText, ChevronDown, Users, Search, X, Bold, Italic, List, Link2, Type as TypeIcon, Smile, Calendar, Clock, Wand2, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Send, Sparkles, Paperclip, Trash2, ThumbsUp, ThumbsDown, Loader2, FileText, ChevronDown, Users, Search, X, Bold, Italic, List, Link2, Type as TypeIcon, Smile, Calendar, Clock, Wand2, CheckCircle2, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
@@ -7,8 +7,25 @@ import { format, addHours, addDays, startOfHour } from 'date-fns';
 import { Investor } from '../data/investors';
 import { Email } from '../data/emails';
 import { clientGemini as ai } from '../lib/env';
-import { buildVaultPromptContext, loadVaultData } from '../lib/vault';
+import {
+  DEFAULT_EMAIL_TEMPLATES,
+  EmailTemplate,
+  getTemplateLibrary,
+  isCustomTemplate,
+  loadCustomTemplates,
+  saveCustomTemplates,
+} from '../lib/template-library';
+import { buildVaultPromptContext, loadVaultData, subscribeToVaultChanges, VaultData } from '../lib/vault';
 import { InvestorAvatar } from './InvestorAvatar';
+
+const BRAND_NAME = 'Novalyte AI';
+const SENDER_EMAIL =
+  import.meta.env.VITE_SMTP_FROM_EMAIL ||
+  import.meta.env.VITE_MAIL_FROM_EMAIL ||
+  'novalyte-ai@echoclips.dev';
+const SENDER_IDENTITY = SENDER_EMAIL.includes('<')
+  ? SENDER_EMAIL
+  : `${BRAND_NAME} <${SENDER_EMAIL}>`;
 
 interface ComposeViewProps {
   onSend?: (email: Partial<Email> & { scheduledFor?: string }) => void;
@@ -17,26 +34,14 @@ interface ComposeViewProps {
   interestedInvestors: Investor[];
 }
 
-const EMAIL_TEMPLATES = [
-  {
-    id: 'intro',
-    name: 'Cold Intro',
-    subject: 'Novalyte AI x [Firm Name] - Pre-seed Round',
-    body: "Hi [Investor Name],<br><br>I've been following [Firm Name]'s work in [Industry] and thought there may be a fit with your focus on [Specific Area].<br><br>I'm the founder of Novalyte AI. We're currently raising and I would value the chance to share why this may fit your thesis.<br><br>Would you be open to a short intro call next week?<br><br>Best,<br>[My Name]"
-  },
-  {
-    id: 'follow-up',
-    name: 'Quick Follow-up',
-    subject: 'Re: Novalyte AI - Pre-seed Round',
-    body: "Hi [Investor Name],<br><br>Just wanted to circle back on my earlier note in case it got buried. I still think there could be a fit between your focus and what we're building at Novalyte AI.<br><br>If useful, I can send a short overview or make time for a quick intro.<br><br>Best,<br>[My Name]"
-  },
-  {
-    id: 'update',
-    name: 'Monthly Progress Update',
-    subject: 'Novalyte AI: Monthly Update - [Month] [Year]',
-    body: "Hi [Investor Name],<br><br>I wanted to share a quick update on Novalyte AI's progress this month:<br><br>- <b>Traction:</b> [Metric 1]<br>- <b>Product:</b> [Metric 2]<br>- <b>Team:</b> [Metric 3]<br><br>If helpful, I can send a fuller update or make time for a quick intro.<br><br>Best,<br>[My Name]"
-  }
-];
+interface EditableTemplate {
+  id: string | null;
+  name: string;
+  description: string;
+  subject: string;
+  body: string;
+  origin: 'default' | 'custom';
+}
 
 const QUILL_MODULES = {
   toolbar: [
@@ -55,11 +60,54 @@ const QUILL_FORMATS = [
   'link', 'image'
 ];
 
+const TEMPLATE_QUILL_MODULES = {
+  toolbar: [
+    ['bold', 'italic'],
+    [{ list: 'bullet' }],
+    ['link'],
+  ],
+};
+
+const TEMPLATE_QUILL_FORMATS = ['bold', 'italic', 'list', 'link'];
+
+function createEmptyTemplate(): EditableTemplate {
+  return {
+    id: null,
+    name: '',
+    description: '',
+    subject: '',
+    body: '',
+    origin: 'custom',
+  };
+}
+
+function toEditableTemplate(template: EmailTemplate): EditableTemplate {
+  return {
+    id: template.id,
+    name: template.name,
+    description: template.description,
+    subject: template.subject,
+    body: template.body,
+    origin: template.origin,
+  };
+}
+
 export function ComposeView({ onSend, initialInvestor, initialDraft, interestedInvestors }: ComposeViewProps) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(initialInvestor || null);
+  const [vaultData, setVaultData] = useState<VaultData>(() => loadVaultData());
+  const [customTemplates, setCustomTemplates] = useState<EmailTemplate[]>(() => loadCustomTemplates());
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    DEFAULT_EMAIL_TEMPLATES[0]?.id || null,
+  );
+  const [templateDraft, setTemplateDraft] = useState<EditableTemplate>(() =>
+    DEFAULT_EMAIL_TEMPLATES[0]
+      ? toEditableTemplate(DEFAULT_EMAIL_TEMPLATES[0])
+      : createEmptyTemplate(),
+  );
+  const [templateNotice, setTemplateNotice] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -71,6 +119,45 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
   const [scheduledDate, setScheduledDate] = useState<string>(format(addHours(startOfHour(new Date()), 1), "yyyy-MM-dd'T'HH:mm"));
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const templateLibrary = useMemo(
+    () => getTemplateLibrary(customTemplates),
+    [customTemplates],
+  );
+  const selectedTemplate = useMemo(
+    () =>
+      selectedTemplateId
+        ? templateLibrary.find((template) => template.id === selectedTemplateId) || null
+        : null,
+    [selectedTemplateId, templateLibrary],
+  );
+
+  useEffect(() => {
+    setVaultData(loadVaultData());
+    return subscribeToVaultChanges(setVaultData);
+  }, []);
+
+  useEffect(() => {
+    saveCustomTemplates(customTemplates);
+  }, [customTemplates]);
+
+  useEffect(() => {
+    if (selectedTemplate) {
+      setTemplateDraft((current) => {
+        if (
+          current.id === selectedTemplate.id &&
+          current.name === selectedTemplate.name &&
+          current.description === selectedTemplate.description &&
+          current.subject === selectedTemplate.subject &&
+          current.body === selectedTemplate.body &&
+          current.origin === selectedTemplate.origin
+        ) {
+          return current;
+        }
+
+        return toEditableTemplate(selectedTemplate);
+      });
+    }
+  }, [selectedTemplate, selectedTemplateId, templateLibrary]);
 
   // Auto-save logic
   useEffect(() => {
@@ -104,7 +191,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
     if (initialInvestor) {
       setSelectedInvestor(initialInvestor);
       setTo(initialInvestor.email || '');
-      setSubject(`Intro: Novalyte AI x ${initialInvestor.firm || initialInvestor.name}`);
+      setSubject(`Intro: ${BRAND_NAME} x ${initialInvestor.firm || initialInvestor.name}`);
     }
     
     if (initialDraft) {
@@ -135,31 +222,168 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
     }
   }, [initialInvestor, initialDraft, interestedInvestors]);
 
-  const applyTemplate = (template: typeof EMAIL_TEMPLATES[0]) => {
-    let newSubject = template.subject;
-    let newBody = template.body;
+  useEffect(() => {
+    if (!templateNotice) return;
 
+    const timer = window.setTimeout(() => setTemplateNotice(''), 2400);
+    return () => window.clearTimeout(timer);
+  }, [templateNotice]);
+
+  const applyTemplate = (template: Pick<EditableTemplate, 'name' | 'subject' | 'body'>) => {
     const firmName = selectedInvestor?.firm || selectedInvestor?.name || '[Firm Name]';
     const investorName = selectedInvestor?.name ? selectedInvestor.name.split(' ')[0] : '[Investor Name]';
     const industry = selectedInvestor?.focus?.[0] || 'your sector';
     const specificArea = selectedInvestor?.focus?.[1] || 'your focus areas';
+    const investorFullName = selectedInvestor?.name || '[Investor Full Name]';
 
-    newSubject = newSubject
+    const newSubject = template.subject
       .replace(/\[Firm Name\]/g, firmName)
       .replace(/\[Investor Name\]/g, investorName)
-      .replace(/\[Industry\]/g, industry)
-      .replace(/\[Specific Area\]/g, specificArea);
-
-    newBody = newBody
-      .replace(/\[Firm Name\]/g, firmName)
-      .replace(/\[Investor Name\]/g, investorName)
+      .replace(/\[Investor Full Name\]/g, investorFullName)
       .replace(/\[Industry\]/g, industry)
       .replace(/\[Specific Area\]/g, specificArea)
-      .replace(/\[My Name\]/g, 'Founder'); // Default fallback
+      .replace(/\[Brand Name\]/g, BRAND_NAME);
+
+    const newBody = template.body
+      .replace(/\[Firm Name\]/g, firmName)
+      .replace(/\[Investor Name\]/g, investorName)
+      .replace(/\[Investor Full Name\]/g, investorFullName)
+      .replace(/\[Industry\]/g, industry)
+      .replace(/\[Specific Area\]/g, specificArea)
+      .replace(/\[Brand Name\]/g, BRAND_NAME)
+      .replace(/\[My Name\]/g, BRAND_NAME);
 
     setSubject(newSubject);
     setBody(newBody);
+    setTemplateNotice(`Applied "${template.name}"`);
     setShowTemplates(false);
+  };
+
+  const selectTemplateForEditing = (template: EmailTemplate) => {
+    setSelectedTemplateId(template.id);
+    setTemplateDraft(toEditableTemplate(template));
+  };
+
+  const updateTemplateDraft = (patch: Partial<EditableTemplate>) => {
+    setTemplateDraft((current) => ({
+      ...current,
+      ...patch,
+    }));
+  };
+
+  const handleNewTemplate = () => {
+    setSelectedTemplateId(null);
+    setTemplateDraft(createEmptyTemplate());
+    setTemplateNotice('New template started');
+  };
+
+  const handleSaveCurrentDraftAsTemplate = () => {
+    const trimmedSubject = subject.trim();
+    const trimmedBody = body.trim();
+
+    if (!trimmedSubject || !trimmedBody) {
+      alert('Write a subject and body first, then save the draft as a template.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const templateId = `template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const nextTemplate: EmailTemplate = {
+      id: templateId,
+      name: trimmedSubject.slice(0, 48),
+      description: 'Saved from a live outreach draft.',
+      subject: trimmedSubject,
+      body: trimmedBody,
+      origin: 'custom',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setCustomTemplates((current) => [nextTemplate, ...current]);
+    setSelectedTemplateId(templateId);
+    setTemplateDraft(toEditableTemplate(nextTemplate));
+    setTemplateNotice('Draft saved to template library');
+    setShowTemplates(true);
+  };
+
+  const handleSaveTemplate = () => {
+    const name = templateDraft.name.trim();
+    const subjectValue = templateDraft.subject.trim();
+    const bodyValue = templateDraft.body.trim();
+
+    if (!name || !subjectValue || !bodyValue) {
+      alert('Template name, subject, and body are required.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    if (templateDraft.origin === 'custom' && templateDraft.id) {
+      const updatedTemplate: EmailTemplate = {
+        id: templateDraft.id,
+        name,
+        description: templateDraft.description.trim(),
+        subject: subjectValue,
+        body: bodyValue,
+        origin: 'custom',
+        createdAt:
+          customTemplates.find((template) => template.id === templateDraft.id)?.createdAt ||
+          now,
+        updatedAt: now,
+      };
+
+      setCustomTemplates((current) =>
+        current.map((template) =>
+          template.id === updatedTemplate.id ? updatedTemplate : template,
+        ),
+      );
+      setSelectedTemplateId(updatedTemplate.id);
+      setTemplateDraft(toEditableTemplate(updatedTemplate));
+      setTemplateNotice('Template updated');
+      return;
+    }
+
+    const newTemplate: EmailTemplate = {
+      id: `template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      description: templateDraft.description.trim(),
+      subject: subjectValue,
+      body: bodyValue,
+      origin: 'custom',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setCustomTemplates((current) => [newTemplate, ...current]);
+    setSelectedTemplateId(newTemplate.id);
+    setTemplateDraft(toEditableTemplate(newTemplate));
+    setTemplateNotice(
+      templateDraft.origin === 'default'
+        ? 'Saved as a custom copy'
+        : 'Template saved',
+    );
+  };
+
+  const handleDeleteTemplate = () => {
+    if (!selectedTemplate || !isCustomTemplate(selectedTemplate)) {
+      return;
+    }
+
+    if (!confirm(`Delete template "${selectedTemplate.name}"?`)) {
+      return;
+    }
+
+    setCustomTemplates((current) =>
+      current.filter((template) => template.id !== selectedTemplate.id),
+    );
+    const fallbackTemplate = templateLibrary.find(
+      (template) => template.id !== selectedTemplate.id,
+    );
+    setSelectedTemplateId(fallbackTemplate?.id || null);
+    setTemplateDraft(
+      fallbackTemplate ? toEditableTemplate(fallbackTemplate) : createEmptyTemplate(),
+    );
+    setTemplateNotice('Template deleted');
   };
 
   const handleAiAction = async (action: 'generate' | 'refine' | 'subject') => {
@@ -171,7 +395,6 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
     setIsGenerating(true);
     setFeedback(null);
     try {
-      const vaultData = loadVaultData();
       const context = buildVaultPromptContext(vaultData, {
         documentLimit: 5,
         charsPerDocument: 1000,
@@ -179,15 +402,17 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
 
       let prompt = '';
       if (action === 'generate') {
-        prompt = `Draft a professional investor outreach email for Novalyte AI based on this request: "${aiPrompt}".
+        prompt = `Draft a professional investor outreach email for ${BRAND_NAME} based on this request: "${aiPrompt}".
 
         Critical instructions:
-        1. Treat the company vault below as the source of truth for Novalyte AI.
+        1. Treat the company vault below as the source of truth for ${BRAND_NAME}.
         2. Do not invent traction, metrics, customers, pilots, partnerships, or claims that are not present in the vault.
         3. If a target investor profile is provided, use Google Search to find recent, factual context about that investor or firm and tailor the email to their thesis.
         4. Use the strongest proof points from the vault when they are relevant.
         5. Keep the email concise, credible, and written for a real investor.
-        6. Return only the email body as HTML.
+        6. Write from the perspective of ${BRAND_NAME}.
+        7. If you include a sign-off, sign it as ${BRAND_NAME}.
+        8. Return only the email body as HTML.
 
         Company vault:
         ${context}`;
@@ -199,7 +424,8 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
         2. Do not add claims that are not supported by the vault.
         3. Make it more personalized to the target investor if a profile is provided.
         4. Improve clarity, confidence, and the call to action.
-        5. Return only the email body as HTML.
+        5. Keep the sender identity aligned with ${BRAND_NAME}.
+        6. Return only the email body as HTML.
 
         Company vault:
         ${context}`;
@@ -210,7 +436,8 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
         1. Use the target investor's firm name or focus area if provided.
         2. Keep them personal and credible, not spammy.
         3. Align them with the company vault below.
-        4. Return only the 3 subject lines separated by newlines.
+        4. Make them clearly about ${BRAND_NAME}, not a generic startup.
+        5. Return only the 3 subject lines separated by newlines.
 
         Company vault:
         ${context}`;
@@ -221,7 +448,11 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
         - Name: ${selectedInvestor.name}
         - Firm: ${selectedInvestor.firm}
         - Focus: ${selectedInvestor.focus.join(', ')}
-        - Bio: ${selectedInvestor.bio}`;
+        - Bio: ${selectedInvestor.bio}
+        - Latest summary: ${selectedInvestor.latestSummary || 'Not available'}
+        - Latest news: ${(selectedInvestor.latestNews || []).join('; ') || 'Not available'}
+        - Pain points: ${(selectedInvestor.painPoints || []).join('; ') || 'Not available'}
+        - Financial goals: ${(selectedInvestor.financialGoals || []).join('; ') || 'Not available'}`;
       }
 
       prompt += `\nKeep the response grounded in the provided information.`;
@@ -296,15 +527,16 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
   const selectInvestor = (inv: Investor) => {
     setSelectedInvestor(inv);
     setTo(inv.email || '');
-    setSubject(`Intro: Novalyte AI x ${inv.firm || inv.name}`);
+    setSubject(`Intro: ${BRAND_NAME} x ${inv.firm || inv.name}`);
     setShowInvestorPicker(false);
   };
 
   return (
     <div className="flex flex-col h-full bg-black">
       {/* Header */}
-      <div className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-950/50 backdrop-blur">
-        <div className="flex items-center gap-4">
+      <div className="min-h-16 border-b border-zinc-800 bg-zinc-950/50 px-4 py-3 backdrop-blur md:h-16 md:px-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-3 md:gap-4">
           <h2 className="text-xl font-bold text-white">Compose</h2>
           {selectedInvestor && (
             <div className="flex items-center gap-2 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
@@ -334,10 +566,10 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
             )}
           </AnimatePresence>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center md:justify-end">
           <button 
             onClick={() => setShowTemplates(!showTemplates)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 text-zinc-400 hover:text-white text-sm transition-colors border border-zinc-800"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-white sm:w-auto"
           >
             <FileText size={16} />
             Templates
@@ -347,7 +579,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
           <div className="relative">
             <button 
               onClick={() => setShowInvestorPicker(!showInvestorPicker)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 text-zinc-400 hover:text-white text-sm transition-colors border border-zinc-800"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-white sm:w-auto"
             >
               <Users size={16} />
               Choose Investor
@@ -359,7 +591,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute right-0 mt-2 w-72 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 overflow-hidden"
+                  className="absolute right-0 z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
                 >
                   <div className="p-4 border-b border-zinc-800">
                     <div className="relative">
@@ -403,6 +635,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
             </AnimatePresence>
           </div>
         </div>
+        </div>
       </div>
 
       {/* Templates Dropdown */}
@@ -412,29 +645,215 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-zinc-900 border-b border-zinc-800 overflow-hidden"
+            className="max-h-[78vh] overflow-y-auto border-b border-zinc-800 bg-zinc-900"
           >
-            <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-              {EMAIL_TEMPLATES.map(template => (
-                <button
-                  key={template.id}
-                  onClick={() => applyTemplate(template)}
-                  className="text-left p-4 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 transition-all group"
-                >
-                  <p className="text-sm font-bold text-white mb-1 group-hover:text-blue-400">{template.name}</p>
-                  <p className="text-xs text-zinc-500 line-clamp-2">{template.subject}</p>
-                </button>
-              ))}
+            <div className="p-4 md:p-5">
+              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-white">Template Library</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Choose, edit, save, and reuse outreach templates directly from Compose.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {templateNotice && (
+                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold text-emerald-300">
+                      {templateNotice}
+                    </span>
+                  )}
+                  <button
+                    onClick={handleNewTemplate}
+                    className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white"
+                  >
+                    <FileText size={14} />
+                    New Template
+                  </button>
+                  <button
+                    onClick={handleSaveCurrentDraftAsTemplate}
+                    className="flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-300 transition-colors hover:bg-blue-500/20"
+                  >
+                    <Plus size={14} />
+                    Save Draft as Template
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[320px,1fr]">
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60">
+                  <div className="border-b border-zinc-800 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                      Saved Templates
+                    </p>
+                  </div>
+                  <div className="max-h-[420px] space-y-2 overflow-y-auto p-3">
+                    {templateLibrary.map((template) => (
+                      <button
+                        key={template.id}
+                        onClick={() => selectTemplateForEditing(template)}
+                        className={`w-full rounded-2xl border p-4 text-left transition-all ${
+                          selectedTemplateId === template.id
+                            ? 'border-blue-500/40 bg-blue-500/10'
+                            : 'border-zinc-800 bg-zinc-900/70 hover:border-zinc-700 hover:bg-zinc-800/70'
+                        }`}
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <p className="text-sm font-bold text-white">{template.name}</p>
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+                              template.origin === 'custom'
+                                ? 'bg-emerald-500/10 text-emerald-300'
+                                : 'bg-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {template.origin === 'custom' ? 'Custom' : 'Starter'}
+                          </span>
+                        </div>
+                        <p className="mb-2 text-xs text-zinc-500">{template.description || 'No description yet.'}</p>
+                        <p className="line-clamp-2 text-xs text-zinc-400">{template.subject}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60">
+                  <div className="flex flex-col gap-3 border-b border-zinc-800 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        Inline Editor
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Edit here, then use the template directly in outreach.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => applyTemplate({
+                          name: templateDraft.name || 'Untitled Template',
+                          subject: templateDraft.subject,
+                          body: templateDraft.body,
+                        })}
+                        disabled={!templateDraft.subject.trim() || !templateDraft.body.trim()}
+                        className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-300 transition-colors hover:bg-blue-500/20 disabled:opacity-40"
+                      >
+                        Use in Compose
+                      </button>
+                      <button
+                        onClick={handleSaveTemplate}
+                        disabled={!templateDraft.name.trim() || !templateDraft.subject.trim() || !templateDraft.body.trim()}
+                        className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-200 transition-colors hover:border-zinc-600 hover:text-white disabled:opacity-40"
+                      >
+                        Save Template
+                      </button>
+                      <button
+                        onClick={handleDeleteTemplate}
+                        disabled={!selectedTemplate || !isCustomTemplate(selectedTemplate)}
+                        className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-30"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 p-4">
+                    {selectedTemplate?.origin === 'default' && (
+                      <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+                        You are editing a starter template. Saving will create a custom copy in your library.
+                      </div>
+                    )}
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                          Template Name
+                        </span>
+                        <input
+                          type="text"
+                          value={templateDraft.name}
+                          onChange={(event) => updateTemplateDraft({ name: event.target.value })}
+                          placeholder="Founder intro, thesis fit, follow-up..."
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                          Description
+                        </span>
+                        <input
+                          type="text"
+                          value={templateDraft.description}
+                          onChange={(event) => updateTemplateDraft({ description: event.target.value })}
+                          placeholder="When to use this template"
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        Subject Template
+                      </span>
+                      <input
+                        type="text"
+                        value={templateDraft.subject}
+                        onChange={(event) => updateTemplateDraft({ subject: event.target.value })}
+                        placeholder="[Brand Name] x [Firm Name]"
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </label>
+
+                    <div>
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        Body Template
+                      </span>
+                      <div className="template-library-editor overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+                        <ReactQuill
+                          theme="snow"
+                          value={templateDraft.body}
+                          onChange={(value) => updateTemplateDraft({ body: value })}
+                          modules={TEMPLATE_QUILL_MODULES}
+                          formats={TEMPLATE_QUILL_FORMATS}
+                          placeholder="Hi [Investor Name], ..."
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        Placeholders
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {['[Brand Name]', '[My Name]', '[Investor Name]', '[Investor Full Name]', '[Firm Name]', '[Industry]', '[Specific Area]'].map((token) => (
+                          <span
+                            key={token}
+                            className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs text-zinc-400"
+                          >
+                            {token}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Editor Area */}
-      <div className="flex-1 flex flex-col bg-zinc-950 p-6 overflow-hidden">
-        <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col bg-zinc-900/30 rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
-          <div className="px-6 py-4 border-b border-zinc-800 flex items-center gap-4">
-            <span className="text-sm font-medium text-zinc-500 w-16">To</span>
+      <div className="flex-1 overflow-hidden bg-zinc-950 p-3 md:p-6">
+        <div className="mx-auto flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/30 shadow-2xl">
+          <div className="flex flex-col gap-2 border-b border-zinc-800 px-4 py-4 md:flex-row md:items-center md:gap-4 md:px-6">
+            <span className="text-sm font-medium text-zinc-500 md:w-16">From</span>
+            <div className="flex-1">
+              <p className="text-sm text-white">{SENDER_IDENTITY}</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Outbound emails are drafted and sent as {BRAND_NAME}.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 border-b border-zinc-800 px-4 py-4 md:flex-row md:items-center md:gap-4 md:px-6">
+            <span className="text-sm font-medium text-zinc-500 md:w-16">To</span>
             <input
               type="text"
               value={to}
@@ -443,8 +862,43 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
               placeholder="investor@firm.com"
             />
           </div>
-          <div className="px-6 py-4 border-b border-zinc-800 flex items-center gap-4">
-            <span className="text-sm font-medium text-zinc-500 w-16">Subject</span>
+          {(vaultData.emailGuidance || vaultData.proofPoints.length > 0) && (
+            <div className="border-b border-zinc-800 bg-zinc-950/60 px-4 py-4 md:px-6">
+              <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+                    Novalyte AI Email Guidance
+                  </p>
+                  <p className="text-sm leading-relaxed text-zinc-300">
+                    {vaultData.emailGuidance || 'Analyze the Novalyte Vault to generate tighter outreach guidance.'}
+                  </p>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+                    Proof Points To Use
+                  </p>
+                  {vaultData.proofPoints.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                      Analyze the vault to pull the strongest proof points into compose.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {vaultData.proofPoints.slice(0, 4).map((point) => (
+                        <span
+                          key={point}
+                          className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300"
+                        >
+                          {point}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-2 border-b border-zinc-800 px-4 py-4 md:flex-row md:items-center md:gap-4 md:px-6">
+            <span className="text-sm font-medium text-zinc-500 md:w-16">Subject</span>
             <input
               type="text"
               value={subject}
@@ -474,8 +928,8 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
             />
 
             {/* AI Assistant Floating Bar */}
-            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-10">
-              <div className="bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 rounded-2xl p-2 shadow-2xl flex items-center gap-2">
+            <div className="compose-ai-bar">
+              <div className="compose-ai-shell bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 rounded-2xl p-2 shadow-2xl flex items-center gap-2">
                 <div className="p-2 text-blue-400">
                   <Sparkles size={20} />
                 </div>
@@ -487,7 +941,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
                   onKeyDown={(e) => e.key === 'Enter' && handleAiAction('generate')}
                   className="flex-1 bg-transparent text-sm text-white focus:outline-none"
                 />
-                <div className="flex items-center gap-1">
+                <div className="compose-ai-actions flex items-center gap-1">
                   <button 
                     onClick={() => handleAiAction('refine')}
                     disabled={isGenerating || !body}
@@ -509,20 +963,20 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
           </div>
 
           {/* Action Bar */}
-          <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center bg-white rounded-2xl shadow-lg overflow-hidden">
+          <div className="flex flex-col gap-4 border-t border-zinc-800 bg-zinc-900/50 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
+              <div className="flex w-full items-center overflow-hidden rounded-2xl bg-white shadow-lg sm:w-auto">
                 <button 
                   onClick={() => handleSend(false)}
                   disabled={isSending}
-                  className="px-8 py-3 bg-white text-zinc-900 text-sm font-bold hover:bg-zinc-200 transition-all flex items-center gap-2 disabled:opacity-50 border-r border-zinc-200"
+                  className="flex flex-1 items-center justify-center gap-2 border-r border-zinc-200 bg-white px-6 py-3 text-sm font-bold text-zinc-900 transition-all hover:bg-zinc-200 disabled:opacity-50 sm:flex-none sm:px-8"
                 >
                   {isSending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
                   {isSending ? 'Sending...' : 'Send'}
                 </button>
                 <button 
                   onClick={() => setShowSchedule(!showSchedule)}
-                  className="px-3 py-3 bg-white text-zinc-900 hover:bg-zinc-200 transition-all"
+                  className="bg-white px-3 py-3 text-zinc-900 transition-all hover:bg-zinc-200"
                   title="Schedule Send"
                 >
                   <ChevronDown size={18} />
@@ -536,7 +990,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute bottom-20 left-6 w-72 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-4 z-50"
+                    className="absolute bottom-24 left-3 right-3 z-50 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-2xl sm:left-6 sm:right-auto sm:w-72"
                   >
                     <div className="flex items-center gap-2 mb-4 text-white font-bold text-sm">
                       <Calendar size={16} className="text-blue-400" />
@@ -577,7 +1031,7 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
                 )}
               </AnimatePresence>
               
-              <div className="flex items-center gap-1 ml-4 border-l border-zinc-800 pl-4">
+              <div className="flex items-center gap-1 border-zinc-800 sm:ml-4 sm:border-l sm:pl-4">
                 <button className="p-2.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors" title="Attach files">
                   <Paperclip size={18} />
                 </button>
@@ -649,13 +1103,13 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
           font-size: 16px;
         }
         .ql-editor {
-          padding: 32px;
+          padding: 24px 24px 160px;
           line-height: 1.6;
         }
         .ql-editor.ql-blank::before {
           color: #3f3f46;
           font-style: normal;
-          left: 32px;
+          left: 24px;
         }
         .ql-snow .ql-stroke {
           stroke: #71717a;
@@ -669,6 +1123,53 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
         .ql-snow.ql-toolbar button:hover .ql-stroke,
         .ql-snow.ql-toolbar button.ql-active .ql-stroke {
           stroke: #3b82f6;
+        }
+        .template-library-editor .ql-toolbar.ql-snow {
+          padding: 10px 12px;
+          background: rgba(9, 9, 11, 0.9);
+        }
+        .template-library-editor .ql-container.ql-snow {
+          min-height: 220px;
+          font-size: 14px;
+        }
+        .template-library-editor .ql-editor {
+          min-height: 220px;
+          padding: 18px;
+        }
+        .template-library-editor .ql-editor.ql-blank::before {
+          left: 18px;
+        }
+        .compose-ai-bar {
+          position: absolute;
+          left: 50%;
+          bottom: 1.5rem;
+          width: 100%;
+          max-width: 42rem;
+          transform: translateX(-50%);
+          padding: 0 1rem;
+          z-index: 10;
+        }
+        @media (max-width: 767px) {
+          .ql-editor {
+            padding: 18px 16px 24px;
+          }
+          .ql-editor.ql-blank::before {
+            left: 16px;
+          }
+          .compose-ai-bar {
+            position: static;
+            max-width: none;
+            transform: none;
+            padding: 0.75rem;
+          }
+          .compose-ai-shell {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .compose-ai-actions {
+            width: 100%;
+            justify-content: space-between;
+          }
         }
       `}</style>
     </div>

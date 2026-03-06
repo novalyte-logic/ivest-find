@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { ArrowRight, Loader2, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { parseJsonResponse } from '../lib/http';
 
 interface AccessGateProps {
   onUnlock: () => void;
@@ -20,16 +21,11 @@ export function AccessGate({ onUnlock }: AccessGateProps) {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
         body: JSON.stringify({ code }),
       });
-
-      const result = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setError(result.error || 'Incorrect access code.');
-        return;
-      }
+      await parseJsonResponse<{ authenticated?: boolean; error?: string }>(response);
 
       setError('');
       setCode('');

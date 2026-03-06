@@ -37,6 +37,8 @@ export interface VaultData {
   investorFitSummary: string;
   emailGuidance: string;
   investorKeywords: string[];
+  recommendedInvestorTypes: string[];
+  investorSearchQueries: string[];
   proofPoints: string[];
   lastSavedAt: string | null;
   lastAnalyzedAt: string | null;
@@ -60,10 +62,12 @@ const EMPTY_VAULT_DATA: VaultData = {
   investorFitSummary: '',
   emailGuidance: '',
   investorKeywords: [],
+  recommendedInvestorTypes: [],
+  investorSearchQueries: [],
   proofPoints: [],
   lastSavedAt: null,
   lastAnalyzedAt: null,
-  version: 2,
+  version: 3,
 };
 
 function sanitizeText(value: unknown): string {
@@ -120,6 +124,8 @@ function normalizeVaultData(value: unknown): VaultData {
     investorFitSummary: sanitizeText(record.investorFitSummary),
     emailGuidance: sanitizeText(record.emailGuidance),
     investorKeywords: sanitizeStringArray(record.investorKeywords),
+    recommendedInvestorTypes: sanitizeStringArray(record.recommendedInvestorTypes),
+    investorSearchQueries: sanitizeStringArray(record.investorSearchQueries),
     proofPoints: sanitizeStringArray(record.proofPoints),
     lastSavedAt: sanitizeText(record.lastSavedAt) || null,
     lastAnalyzedAt: sanitizeText(record.lastAnalyzedAt) || null,
@@ -247,6 +253,46 @@ export function getVaultPreferredStages(vaultData: VaultData): string[] {
   return Array.from(new Set(stages));
 }
 
+export function getVaultRecommendedInvestorTypes(vaultData: VaultData): string[] {
+  if (vaultData.recommendedInvestorTypes.length > 0) {
+    return Array.from(new Set(vaultData.recommendedInvestorTypes)).slice(0, 8);
+  }
+
+  const keywords = getVaultInvestorKeywords(vaultData);
+  const stages = getVaultPreferredStages(vaultData).join(', ');
+  const defaults = [
+    `${stages} digital health investors`,
+    `${stages} healthcare AI infrastructure investors`,
+    `${stages} clinic operations software investors`,
+    `${stages} men's health investors`,
+  ];
+
+  return Array.from(
+    new Set([
+      ...defaults,
+      ...keywords.slice(0, 4).map((keyword) => `${stages} ${keyword} investors`),
+    ]),
+  ).slice(0, 8);
+}
+
+export function getVaultInvestorSearchQueries(vaultData: VaultData): string[] {
+  if (vaultData.investorSearchQueries.length > 0) {
+    return Array.from(new Set(vaultData.investorSearchQueries)).slice(0, 8);
+  }
+
+  const stages = getVaultPreferredStages(vaultData).join(' ');
+  const keywords = getVaultInvestorKeywords(vaultData);
+  const derivedQueries = [
+    `${stages} digital health investors`,
+    `${stages} healthcare AI investors`,
+    `${stages} clinic infrastructure investors`,
+    `${stages} men's health investors`,
+    ...keywords.slice(0, 4).map((keyword) => `${stages} ${keyword} investors`),
+  ];
+
+  return Array.from(new Set(derivedQueries.map((query) => query.trim()).filter(Boolean))).slice(0, 8);
+}
+
 export function countVaultKeywordMatches(text: string, keywords: string[]): number {
   const normalizedText = normalizeKeyword(text);
   if (!normalizedText) return 0;
@@ -291,6 +337,8 @@ export function buildVaultPromptContext(
     `Email Guidance: ${vaultData.emailGuidance || 'Not analyzed yet.'}`,
     `Proof Points: ${vaultData.proofPoints.length > 0 ? vaultData.proofPoints.join('; ') : 'None saved.'}`,
     `Investor Keywords: ${getVaultInvestorKeywords(vaultData).join(', ') || 'None saved.'}`,
+    `Recommended Investor Types: ${getVaultRecommendedInvestorTypes(vaultData).join('; ') || 'None saved.'}`,
+    `Investor Search Queries: ${getVaultInvestorSearchQueries(vaultData).join('; ') || 'None saved.'}`,
   ];
 
   if (documents.length > 0) {

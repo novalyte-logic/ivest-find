@@ -8,11 +8,28 @@ import { SearchableDropdown } from './SearchableDropdown';
 import { Search, Filter, Activity, SortAsc, SortDesc, ChevronDown, Network, BrainCircuit, Globe, Loader2, Plus, CheckCircle2, X } from 'lucide-react';
 import { calculateMatchScore } from '../lib/matching';
 import { fuzzyMatch, parseInvestmentRange } from '../lib/utils';
-import { Type } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
-import { clientGemini as ai } from '../lib/env';
-import { buildVaultPromptContext, countVaultKeywordMatches, getVaultInvestorKeywords, loadVaultData, subscribeToVaultChanges, VaultData } from '../lib/vault';
+import {
+  countVaultKeywordMatches,
+  getVaultInvestorKeywords,
+  getVaultInvestorSearchQueries,
+  getVaultRecommendedInvestorTypes,
+  loadVaultData,
+  subscribeToVaultChanges,
+  VaultData,
+} from '../lib/vault';
 import { InvestorAvatar } from './InvestorAvatar';
+import { parseJsonResponse } from '../lib/http';
+import {
+  InvestorContactResponse,
+  InvestorIntelProviderStatus,
+  InvestorSearchResponse,
+  loadProviderPreferences,
+  pickContactProvider,
+  pickSearchProvider,
+  ProviderPreferences,
+  saveProviderPreferences,
+} from '../lib/investor-intel';
 
 type SortOption = 'match' | 'rangeAsc' | 'rangeDesc' | 'expertiseMatch';
 const INVESTOR_STORAGE_KEY = 'novalyte_live_investors';
@@ -72,6 +89,9 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
   const [showWebSearchModal, setShowWebSearchModal] = useState(false);
   const [webSearchQuery, setWebSearchQuery] = useState('');
   const [importingIds, setImportingIds] = useState<Set<string>>(new Set());
+  const [contactLookupIds, setContactLookupIds] = useState<Set<string>>(new Set());
+  const [providerStatus, setProviderStatus] = useState<InvestorIntelProviderStatus | null>(null);
+  const [providerPreferences, setProviderPreferences] = useState<ProviderPreferences>(() => loadProviderPreferences());
 
   // Filter States
   const [selectedFocus, setSelectedFocus] = useState<string>('');
@@ -84,6 +104,43 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
     setVaultData(loadVaultData());
     return subscribeToVaultChanges(setVaultData);
   }, []);
+
+  useEffect(() => {
+    const loadProviderStatus = async () => {
+      try {
+        const response = await fetch('/api/investor-intel/providers', {
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+        const result = await parseJsonResponse<InvestorIntelProviderStatus>(response);
+        setProviderStatus(result);
+
+        const nextPreferences: ProviderPreferences = {
+          searchProvider: pickSearchProvider(
+            result.searchProviders,
+            providerPreferences.searchProvider,
+          ),
+          contactProvider: pickContactProvider(
+            result.contactProviders,
+            providerPreferences.contactProvider,
+          ),
+        };
+
+        setProviderPreferences(nextPreferences);
+        saveProviderPreferences(nextPreferences);
+      } catch (error) {
+        console.error('Failed to load investor intel providers', error);
+      }
+    };
+
+    void loadProviderStatus();
+  }, []);
+
+  useEffect(() => {
+    saveProviderPreferences(providerPreferences);
+  }, [providerPreferences]);
 
   useEffect(() => {
     const cleaned = dedupeInvestors(
@@ -102,6 +159,16 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
   const allStages = useMemo(() => Array.from(new Set(investors.map(i => i.stage))), [investors]);
   const allContactPrefs = useMemo(() => Array.from(new Set(investors.map(i => i.contactPreference))).filter(Boolean), [investors]);
   const companyKeywords = useMemo(() => getVaultInvestorKeywords(vaultData), [vaultData]);
+  const suggestedInvestorTypes = useMemo(() => getVaultRecommendedInvestorTypes(vaultData), [vaultData]);
+  const suggestedSearchQueries = useMemo(() => getVaultInvestorSearchQueries(vaultData), [vaultData]);
+  const availableSearchProviders = useMemo(
+    () => providerStatus?.searchProviders.filter((provider) => provider.implemented && provider.configured) || [],
+    [providerStatus],
+  );
+  const availableContactProviders = useMemo(
+    () => providerStatus?.contactProviders.filter((provider) => provider.implemented && provider.configured) || [],
+    [providerStatus],
+  );
 
   const filteredInvestors = useMemo(() => {
     let result = investors.filter(inv => {
@@ -178,78 +245,76 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
     }
   };
 
-  const handleWebSearch = async () => {
-    if (!webSearchQuery.trim()) return;
-    if (!ai) {
-      alert("VITE_GEMINI_API_KEY is not configured.");
+  const handleOpenSmartSearch = (query: string) => {
+    setWebSearchQuery(query);
+    setShowWebSearchModal(true);
+    void handleWebSearch(query);
+  };
+
+  const handleWebSearch = async (queryOverride?: string) => {
+    const finalQuery = queryOverride?.trim() || webSearchQuery.trim() || suggestedSearchQueries[0] || '';
+    if (!finalQuery) return;
+
+    setWebSearchQuery(finalQuery);
+    setIsWebSearching(true);
+    try {
+      const response = await fetch('/api/investor-intel/search', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          query: finalQuery,
+          searchProvider: providerPreferences.searchProvider,
+          limit: 8,
+          vaultData,
+        }),
+      });
+      const result = await parseJsonResponse<InvestorSearchResponse>(response);
+      setWebSearchResults(result.investors);
+    } catch (error) {
+      console.error("Web search error:", error);
+      alert(error instanceof Error ? error.message : 'Failed to search investors.');
+    } finally {
+      setIsWebSearching(false);
+    }
+  };
+
+  const handleVerifyContact = async (investor: Investor) => {
+    if (providerPreferences.contactProvider === 'none') {
+      alert('Choose a contact verification provider first.');
       return;
     }
 
-    setIsWebSearching(true);
+    setContactLookupIds((prev) => new Set(prev).add(investor.id));
     try {
-      const vaultContext = buildVaultPromptContext(vaultData, {
-        documentLimit: 5,
-        charsPerDocument: 900,
+      const response = await fetch('/api/investor-intel/contact', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          investor,
+          contactProvider: providerPreferences.contactProvider,
+        }),
       });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Find real angel investors or venture capitalists who are a strong fit for Novalyte AI.
-
-        User search request: ${webSearchQuery}
-
-        Company source-of-truth:
-        ${vaultContext}
-
-        Instructions:
-        1. Prioritize investors whose thesis, past portfolio, and stated interests match the company context above.
-        2. Prefer real people and real firms with recent public evidence of activity.
-        3. Use the company source-of-truth instead of generic health tech assumptions.
-        4. Do not invent investor details. If something cannot be supported from public info, omit it.
-        5. Return a JSON array of investors with these fields:
-        name, role, firm, bio, focus (array), location, investmentRange, investmentThesis, stage (Pre-Seed, Seed, Series A, or Late Stage), linkedinUrl, email.
-        6. Only include email if it is explicitly public. Otherwise return an empty string.
-        7. Keep each bio and thesis factual and concise.`,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                role: { type: Type.STRING },
-                firm: { type: Type.STRING },
-                bio: { type: Type.STRING },
-                focus: { type: Type.ARRAY, items: { type: Type.STRING } },
-                location: { type: Type.STRING },
-                investmentRange: { type: Type.STRING },
-                investmentThesis: { type: Type.STRING },
-                stage: { type: Type.STRING },
-                linkedinUrl: { type: Type.STRING },
-                email: { type: Type.STRING }
-              },
-              required: ["name", "role", "bio", "focus", "location", "investmentRange", "investmentThesis", "stage"]
-            }
-          }
-        }
-      });
-
-      const results = JSON.parse(response.text || "[]");
-      const formattedResults = results.map((res: any, index: number) => ({
-        ...res,
-        id: `web-${Date.now()}-${index}`,
-        imageUrl: undefined,
-        industryExpertise: res.focus,
-        contactPreference: res.email ? 'Email' : 'Research First',
-        tags: ['Web Found'],
-        email: res.email || undefined,
-      }));
-      setWebSearchResults(formattedResults);
+      const result = await parseJsonResponse<InvestorContactResponse>(response);
+      setWebSearchResults((prev) =>
+        prev.map((item) => (item.id === investor.id ? result.investor : item)),
+      );
     } catch (error) {
-      console.error("Web search error:", error);
+      console.error('Contact verification error:', error);
+      alert(error instanceof Error ? error.message : 'Failed to verify contact.');
     } finally {
-      setIsWebSearching(false);
+      setContactLookupIds((prev) => {
+        const next = new Set(prev);
+        next.delete(investor.id);
+        return next;
+      });
     }
   };
 
@@ -291,6 +356,62 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
               <Network size={14} />
               {showGraph ? 'Hide Graph' : 'Show Network'}
             </button>
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-3xl border border-blue-500/20 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.14),_rgba(9,9,11,0.94)_60%)] p-6">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-blue-300">
+              <BrainCircuit size={14} />
+              AI Smart Assist
+            </p>
+            <h3 className="text-lg font-bold text-white">Investor targeting from the Novalyte Vault</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-zinc-300">
+              {vaultData.investorFitSummary || 'Run Analyze Vault in the Novalyte Vault to generate tailored investor targeting guidance.'}
+            </p>
+          </div>
+          <button
+            onClick={() => setShowWebSearchModal(true)}
+            className="shrink-0 rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-2 text-xs font-bold text-blue-300 transition-colors hover:bg-blue-500/20"
+          >
+            Open Search
+          </button>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[1.2fr,1fr]">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+              Suggested Investor Types
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestedInvestorTypes.map((investorType) => (
+                <span
+                  key={investorType}
+                  className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300"
+                >
+                  {investorType}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+              One-Click Search Prompts
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestedSearchQueries.map((query) => (
+                <button
+                  key={query}
+                  onClick={() => handleOpenSmartSearch(query)}
+                  className="rounded-full border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-left text-xs font-medium text-zinc-300 transition-colors hover:border-blue-500/40 hover:text-white"
+                >
+                  {query}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -492,7 +613,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                   <Globe className="text-blue-500" size={24} />
                   <div>
                     <h3 className="text-xl font-bold text-white">Web Intelligence Search</h3>
-                    <p className="text-xs text-zinc-500">Find real investors using Gemini & Google Search</p>
+                    <p className="text-xs text-zinc-500">Find real investors with a chosen search provider, then verify contacts one by one.</p>
                   </div>
                 </div>
                 <button onClick={() => setShowWebSearchModal(false)} className="text-zinc-500 hover:text-white">
@@ -500,12 +621,57 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                 </button>
               </div>
 
+              <div className="grid grid-cols-1 gap-3 border-b border-zinc-800 bg-zinc-950/60 px-6 py-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                    Search Provider
+                  </span>
+                  <select
+                    value={providerPreferences.searchProvider}
+                    onChange={(event) =>
+                      setProviderPreferences((current) => ({
+                        ...current,
+                        searchProvider: event.target.value as ProviderPreferences['searchProvider'],
+                      }))
+                    }
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {availableSearchProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                    Contact Verification
+                  </span>
+                  <select
+                    value={providerPreferences.contactProvider}
+                    onChange={(event) =>
+                      setProviderPreferences((current) => ({
+                        ...current,
+                        contactProvider: event.target.value as ProviderPreferences['contactProvider'],
+                      }))
+                    }
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {availableContactProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
               <div className="p-6 border-b border-zinc-800 flex gap-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
                   <input 
                     type="text"
-                    placeholder="e.g. 'Health tech angel investors in London'..."
+                    placeholder={suggestedSearchQueries[0] || "e.g. 'Health tech angel investors in London'..."}
                     value={webSearchQuery}
                     onChange={(e) => setWebSearchQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleWebSearch()}
@@ -514,13 +680,27 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                 </div>
                 <button 
                   onClick={handleWebSearch}
-                  disabled={isWebSearching || !webSearchQuery.trim()}
+                  disabled={isWebSearching || (!webSearchQuery.trim() && suggestedSearchQueries.length === 0)}
                   className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2"
                 >
                   {isWebSearching ? <Loader2 className="animate-spin" size={18} /> : <Globe size={18} />}
                   Search
                 </button>
               </div>
+
+              {suggestedSearchQueries.length > 0 && (
+                <div className="px-6 pb-4 flex flex-wrap gap-2">
+                  {suggestedSearchQueries.slice(0, 6).map((query) => (
+                    <button
+                      key={query}
+                      onClick={() => handleWebSearch(query)}
+                      className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
+                    >
+                      {query}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto p-6">
                 {isWebSearching ? (
@@ -544,34 +724,63 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                           <div>
                             <h4 className="font-bold text-white">{inv.name}</h4>
                             <p className="text-xs text-blue-400 mb-1">{inv.role} {inv.firm ? `@ ${inv.firm}` : ''}</p>
-                            <p className="text-xs text-zinc-400 line-clamp-2 max-w-md">{inv.bio}</p>
+                            <p className="text-xs text-zinc-400 line-clamp-2 max-w-md">
+                              {inv.latestSummary || inv.bio}
+                            </p>
                             {inv.email ? (
                               <p className="mt-1 text-[11px] text-emerald-400">{inv.email}</p>
+                            ) : null}
+                            {inv.contactVerificationStatus ? (
+                              <p className="mt-1 text-[11px] text-zinc-500">
+                                {inv.contactVerificationProvider || 'contact'}: {inv.contactVerificationStatus}
+                              </p>
+                            ) : null}
+                            {inv.latestNews && inv.latestNews.length > 0 ? (
+                              <p className="mt-1 text-[11px] text-zinc-500">
+                                News: {inv.latestNews[0]}
+                              </p>
                             ) : null}
                             <div className="flex flex-wrap gap-1 mt-2">
                               {inv.focus.slice(0, 3).map(f => (
                                 <span key={f} className="px-2 py-0.5 bg-zinc-800 text-[10px] text-zinc-500 rounded-full">{f}</span>
                               ))}
                             </div>
+                            {inv.sourceUrls && inv.sourceUrls.length > 0 ? (
+                              <p className="mt-2 text-[11px] text-zinc-500">
+                                {inv.sourceUrls.length} source{inv.sourceUrls.length === 1 ? '' : 's'} attached
+                              </p>
+                            ) : null}
                           </div>
                         </div>
-                        <button 
-                          onClick={() => handleImportInvestor(inv)}
-                          disabled={importingIds.has(inv.id)}
-                          className="px-3 py-1.5 bg-zinc-800 text-white text-xs font-bold rounded-lg hover:bg-blue-600 transition-all flex items-center gap-2"
-                        >
-                          {importingIds.has(inv.id) ? (
-                            <>
-                              <CheckCircle2 size={14} className="text-green-400" />
-                              Imported
-                            </>
-                          ) : (
-                            <>
-                              <Plus size={14} />
-                              Import
-                            </>
-                          )}
-                        </button>
+                        <div className="flex flex-col gap-2">
+                          <button 
+                            onClick={() => handleImportInvestor(inv)}
+                            disabled={importingIds.has(inv.id)}
+                            className="px-3 py-1.5 bg-zinc-800 text-white text-xs font-bold rounded-lg hover:bg-blue-600 transition-all flex items-center gap-2"
+                          >
+                            {importingIds.has(inv.id) ? (
+                              <>
+                                <CheckCircle2 size={14} className="text-green-400" />
+                                Imported
+                              </>
+                            ) : (
+                              <>
+                                <Plus size={14} />
+                                Import
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleVerifyContact(inv)}
+                            disabled={
+                              contactLookupIds.has(inv.id) ||
+                              providerPreferences.contactProvider === 'none'
+                            }
+                            className="px-3 py-1.5 border border-zinc-700 bg-zinc-950 text-zinc-300 text-xs font-bold rounded-lg hover:border-blue-500/40 hover:text-white transition-all disabled:opacity-50"
+                          >
+                            {contactLookupIds.has(inv.id) ? 'Finding…' : 'Find Contact'}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

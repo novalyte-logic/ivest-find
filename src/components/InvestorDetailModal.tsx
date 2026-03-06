@@ -2,8 +2,17 @@ import { useState, useEffect } from 'react';
 import { Investor } from '../data/investors';
 import { X, Save, Edit2, Trash2, Plus, Tag, Linkedin, ExternalLink, Sparkles, Search, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clientGemini as ai } from '../lib/env';
 import { InvestorAvatar } from './InvestorAvatar';
+import { parseJsonResponse } from '../lib/http';
+import {
+  InvestorContactResponse,
+  InvestorIntelProviderStatus,
+  loadProviderPreferences,
+  pickContactProvider,
+  pickSearchProvider,
+  ProviderPreferences,
+  saveProviderPreferences,
+} from '../lib/investor-intel';
 
 interface InvestorDetailModalProps {
   investor: Investor | null;
@@ -30,6 +39,9 @@ export function InvestorDetailModal({
   const [editedInvestor, setEditedInvestor] = useState<Investor | null>(null);
   const [newTag, setNewTag] = useState('');
   const [isResearching, setIsResearching] = useState(false);
+  const [isFindingContact, setIsFindingContact] = useState(false);
+  const [providerStatus, setProviderStatus] = useState<InvestorIntelProviderStatus | null>(null);
+  const [providerPreferences, setProviderPreferences] = useState<ProviderPreferences>(() => loadProviderPreferences());
 
   useEffect(() => {
     if (investor) {
@@ -39,57 +51,94 @@ export function InvestorDetailModal({
     }
   }, [investor]);
 
+  useEffect(() => {
+    const loadProviderStatus = async () => {
+      if (!isOpen) return;
+
+      try {
+        const response = await fetch('/api/investor-intel/providers', {
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+        const result = await parseJsonResponse<InvestorIntelProviderStatus>(response);
+        setProviderStatus(result);
+        setProviderPreferences((current) => ({
+          searchProvider: pickSearchProvider(result.searchProviders, current.searchProvider),
+          contactProvider: pickContactProvider(result.contactProviders, current.contactProvider),
+        }));
+      } catch (error) {
+        console.error('Failed to load provider status', error);
+      }
+    };
+
+    void loadProviderStatus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    saveProviderPreferences(providerPreferences);
+  }, [providerPreferences]);
+
   if (!investor || !editedInvestor) return null;
 
   const handleResearch = async () => {
-    if (!ai) {
-      alert("VITE_GEMINI_API_KEY is not configured.");
-      return;
-    }
-
     setIsResearching(true);
     try {
-      const prompt = `
-        Research the investor "${editedInvestor.name}" at "${editedInvestor.firm}".
-        Find:
-        1. Recent news or public statements from 2024-2025.
-        2. Their latest 3-5 investments.
-        3. A summary of their current investment focus (e.g., specific AI sub-sectors).
-        
-        Return a JSON object with:
-        {
-          "bio_update": "A concise updated bio including recent news",
-          "new_investments": ["Company A", "Company B"],
-          "focus_update": ["Sector A", "Sector B"]
-        }
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json"
-        }
+      const response = await fetch('/api/investor-intel/research', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          investor: editedInvestor,
+          searchProvider: providerPreferences.searchProvider,
+        }),
       });
-
-      const data = JSON.parse(response.text || "{}");
-      
-      const updated = {
-        ...editedInvestor,
-        bio: data.bio_update || editedInvestor.bio,
-        notableInvestments: [...new Set([...editedInvestor.notableInvestments, ...(data.new_investments || [])])],
-        focus: [...new Set([...editedInvestor.focus, ...(data.focus_update || [])])]
-      };
+      const result = await parseJsonResponse<InvestorContactResponse>(response);
+      const updated = result.investor;
       
       setEditedInvestor(updated);
       onSave(updated);
-      alert("Investor profile enriched with real-time data!");
+      alert("Investor profile enriched with live market and news data.");
     } catch (error) {
       console.error("Research error:", error);
-      alert("Failed to research investor. Please try again.");
+      alert(error instanceof Error ? error.message : "Failed to research investor. Please try again.");
     } finally {
       setIsResearching(false);
+    }
+  };
+
+  const handleFindContact = async () => {
+    if (providerPreferences.contactProvider === 'none') {
+      alert('Choose a contact verification provider first.');
+      return;
+    }
+
+    setIsFindingContact(true);
+    try {
+      const response = await fetch('/api/investor-intel/contact', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          investor: editedInvestor,
+          contactProvider: providerPreferences.contactProvider,
+        }),
+      });
+      const result = await parseJsonResponse<InvestorContactResponse>(response);
+      setEditedInvestor(result.investor);
+      onSave(result.investor);
+    } catch (error) {
+      console.error('Contact lookup error:', error);
+      alert(error instanceof Error ? error.message : 'Failed to find contact.');
+    } finally {
+      setIsFindingContact(false);
     }
   };
 
@@ -205,7 +254,7 @@ export function InvestorDetailModal({
                       onClick={handleResearch}
                       disabled={isResearching}
                       className="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors flex items-center gap-2 border border-blue-500/20 disabled:opacity-50"
-                      title="Research with Google Search"
+                      title="Research with the selected provider"
                     >
                       {isResearching ? (
                         <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
@@ -213,6 +262,21 @@ export function InvestorDetailModal({
                         <Sparkles size={18} />
                       )}
                       <span className="hidden md:inline">Research & Enrich</span>
+                    </button>
+                  )}
+                  {!isEditing && (
+                    <button
+                      onClick={handleFindContact}
+                      disabled={isFindingContact || providerPreferences.contactProvider === 'none'}
+                      className="p-2 bg-zinc-900 text-zinc-300 rounded-lg hover:bg-zinc-800 transition-colors flex items-center gap-2 border border-zinc-800 disabled:opacity-50"
+                      title="Find the right contact with the selected provider"
+                    >
+                      {isFindingContact ? (
+                        <div className="w-4 h-4 border-2 border-zinc-400/30 border-t-zinc-200 rounded-full animate-spin" />
+                      ) : (
+                        <Search size={18} />
+                      )}
+                      <span className="hidden md:inline">Find Contact</span>
                     </button>
                   )}
                   {isEditing ? (
@@ -241,6 +305,96 @@ export function InvestorDetailModal({
 
               {/* Content */}
               <div className="p-4 md:p-8 space-y-6 md:space-y-8">
+                <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label>
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        Research Provider
+                      </span>
+                      <select
+                        value={providerPreferences.searchProvider}
+                        onChange={(event) =>
+                          setProviderPreferences((current) => ({
+                            ...current,
+                            searchProvider: event.target.value as ProviderPreferences['searchProvider'],
+                          }))
+                        }
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      >
+                        {(providerStatus?.searchProviders || []).filter((provider) => provider.implemented && provider.configured).map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        Contact Provider
+                      </span>
+                      <select
+                        value={providerPreferences.contactProvider}
+                        onChange={(event) =>
+                          setProviderPreferences((current) => ({
+                            ...current,
+                            contactProvider: event.target.value as ProviderPreferences['contactProvider'],
+                          }))
+                        }
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      >
+                        {(providerStatus?.contactProviders || []).filter((provider) => provider.implemented && provider.configured).map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                {editedInvestor.latestSummary && (
+                  <section>
+                    <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Live Summary</h3>
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 text-zinc-300 leading-relaxed">
+                      {editedInvestor.latestSummary}
+                    </div>
+                  </section>
+                )}
+
+                {(editedInvestor.latestNews?.length || editedInvestor.painPoints?.length || editedInvestor.financialGoals?.length) && (
+                  <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Latest News</h3>
+                      <div className="space-y-2">
+                        {(editedInvestor.latestNews || []).map((item) => (
+                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-300">
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Pain Points</h3>
+                      <div className="space-y-2">
+                        {(editedInvestor.painPoints || []).map((item) => (
+                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-300">
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Financial Goals</h3>
+                      <div className="space-y-2">
+                        {(editedInvestor.financialGoals || []).map((item) => (
+                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-300">
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                )}
                 
                 {/* Tags Section */}
                 <section>
@@ -423,6 +577,14 @@ export function InvestorDetailModal({
                         <p className="text-zinc-300">{investor.contactPreference}</p>
                       )}
                     </div>
+                    {!isEditing && editedInvestor.contactVerificationStatus && (
+                      <div>
+                        <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Verification</h3>
+                        <p className="text-zinc-300">
+                          {editedInvestor.contactVerificationProvider || 'contact'}: {editedInvestor.contactVerificationStatus}
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-1">Email</h3>
                       {isEditing ? (
@@ -468,6 +630,26 @@ export function InvestorDetailModal({
                     </div>
                   </section>
                 </div>
+
+                {editedInvestor.sourceUrls && editedInvestor.sourceUrls.length > 0 && (
+                  <section>
+                    <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">Sources</h3>
+                    <div className="space-y-2">
+                      {editedInvestor.sourceUrls.map((url) => (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-blue-400 hover:border-zinc-700 hover:text-blue-300"
+                        >
+                          <span className="truncate pr-4">{url}</span>
+                          <ExternalLink size={14} className="shrink-0" />
+                        </a>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
               </div>
 

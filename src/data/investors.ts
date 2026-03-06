@@ -16,6 +16,16 @@ export interface Investor {
   stage: 'Pre-Seed' | 'Seed' | 'Series A' | 'Late Stage';
   linkedinUrl?: string;
   email?: string;
+  companyDomain?: string;
+  sourceUrls?: string[];
+  latestSummary?: string;
+  latestNews?: string[];
+  painPoints?: string[];
+  financialGoals?: string[];
+  contactVerificationProvider?: string;
+  contactVerificationStatus?: string;
+  contactVerified?: boolean;
+  lastEnrichedAt?: string;
 }
 
 const LEGACY_MOCK_INVESTOR_NAMES = new Set([

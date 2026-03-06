@@ -405,6 +405,8 @@ Return JSON with:
 - investorFitSummary: what types of investors are best aligned.
 - emailGuidance: how to position the company in investor outreach.
 - investorKeywords: 8 to 12 short phrases for investor matching.
+- recommendedInvestorTypes: 4 to 8 short investor archetypes or target profiles.
+- investorSearchQueries: 4 to 8 concrete web-search queries to find real investors for Novalyte AI.
 - proofPoints: 4 to 8 concrete proof points taken from the vault.
 
 Company vault:
@@ -421,6 +423,14 @@ ${context}`,
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
               },
+              recommendedInvestorTypes: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              investorSearchQueries: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
               proofPoints: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
@@ -431,6 +441,8 @@ ${context}`,
               'investorFitSummary',
               'emailGuidance',
               'investorKeywords',
+              'recommendedInvestorTypes',
+              'investorSearchQueries',
               'proofPoints',
             ],
           },
@@ -449,6 +461,8 @@ ${context}`,
         emailGuidance:
           typeof parsed.emailGuidance === 'string' ? parsed.emailGuidance.trim() : '',
         investorKeywords: uniqueTrimmedStrings(parsed.investorKeywords).slice(0, 12),
+        recommendedInvestorTypes: uniqueTrimmedStrings(parsed.recommendedInvestorTypes).slice(0, 8),
+        investorSearchQueries: uniqueTrimmedStrings(parsed.investorSearchQueries).slice(0, 8),
         proofPoints: uniqueTrimmedStrings(parsed.proofPoints).slice(0, 8),
         lastAnalyzedAt: new Date().toISOString(),
       });
@@ -812,6 +826,50 @@ ${context}`,
                       >
                         {keyword}
                       </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+                  Recommended Investor Types
+                </p>
+                {data.recommendedInvestorTypes.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                    Analyze the vault to generate AI-recommended investor targets for Novalyte AI.
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {data.recommendedInvestorTypes.map((investorType) => (
+                      <span
+                        key={investorType}
+                        className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300"
+                      >
+                        {investorType}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+                  Suggested Investor Searches
+                </p>
+                {data.investorSearchQueries.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                    Analyze the vault to generate search queries for real investor discovery.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {data.investorSearchQueries.map((query) => (
+                      <div
+                        key={query}
+                        className="rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-sm text-zinc-300"
+                      >
+                        {query}
+                      </div>
                     ))}
                   </div>
                 )}

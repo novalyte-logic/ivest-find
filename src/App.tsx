@@ -12,6 +12,7 @@ import { Investor, isLegacyMockInvestor } from './data/investors';
 import { InvestorAvatar } from './components/InvestorAvatar';
 import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { parseJsonResponse } from './lib/http';
 
 type View = 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose';
 
@@ -19,6 +20,9 @@ const MAILBOX_FROM_EMAIL =
   import.meta.env.VITE_SMTP_FROM_EMAIL ||
   import.meta.env.VITE_MAIL_FROM_EMAIL ||
   'novalyte-ai@echoclips.dev';
+const MAILBOX_FROM = MAILBOX_FROM_EMAIL.includes('<')
+  ? MAILBOX_FROM_EMAIL
+  : `Novalyte AI <${MAILBOX_FROM_EMAIL}>`;
 
 export default function App() {
   const [activeView, setActiveView] = useState<View>('finder');
@@ -37,8 +41,11 @@ export default function App() {
       try {
         const response = await fetch('/api/access/status', {
           credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+          },
         });
-        const result = await response.json();
+        const result = await parseJsonResponse<{ authenticated?: boolean }>(response);
         if (!isCancelled) {
           setHasAccess(Boolean(result.authenticated));
         }
@@ -170,6 +177,7 @@ export default function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            Accept: 'application/json',
           },
           body: JSON.stringify({
             to: email.to,
@@ -177,17 +185,12 @@ export default function App() {
             body: email.body,
           }),
         });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(result.error || 'Failed to send email');
-        }
+        await parseJsonResponse<{ success?: boolean; error?: string }>(response);
       }
 
       const newEmail: Email = {
         id: `sent-${Date.now()}`,
-        from: MAILBOX_FROM_EMAIL,
+        from: MAILBOX_FROM,
         to: email.to || '',
         subject: email.subject || '',
         body: email.body || '',

@@ -32,10 +32,12 @@ export function calculateMatchScore(investor: Investor, vaultData?: VaultData): 
       investorFitSummary: '',
       emailGuidance: '',
       investorKeywords: [],
+      recommendedInvestorTypes: [],
+      investorSearchQueries: [],
       proofPoints: [],
       lastSavedAt: null,
       lastAnalyzedAt: null,
-      version: 2,
+      version: 3,
     },
   );
   const preferredStages = vaultData ? getVaultPreferredStages(vaultData) : ['Pre-Seed', 'Seed'];
