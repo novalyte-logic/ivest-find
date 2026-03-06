@@ -212,10 +212,10 @@ export function InvestorDetailModal({
                       />
                     ) : (
                       <div className="flex items-center gap-2">
-                        <h2 className="text-xl md:text-2xl font-bold text-white">{investor?.name}</h2>
-                        {investor?.linkedinUrl && (
+                        <h2 className="text-xl md:text-2xl font-bold text-white">{editedInvestor.name}</h2>
+                        {editedInvestor.linkedinUrl && (
                           <a 
-                            href={investor.linkedinUrl} 
+                            href={editedInvestor.linkedinUrl} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="text-blue-400 hover:text-blue-300 transition-colors"
@@ -233,7 +233,7 @@ export function InvestorDetailModal({
                         onChange={(e) => handleChange('role', e.target.value)}
                       />
                     ) : (
-                      <p className="text-zinc-400">{investor.role} {investor.firm && `at ${investor.firm}`}</p>
+                      <p className="text-zinc-400">{editedInvestor.role} {editedInvestor.firm && `at ${editedInvestor.firm}`}</p>
                     )}
                   </div>
                 </div>
@@ -440,7 +440,7 @@ export function InvestorDetailModal({
                       onChange={(e) => handleChange('bio', e.target.value)}
                     />
                   ) : (
-                    <p className="text-zinc-300 leading-relaxed">{investor.bio}</p>
+                    <p className="text-zinc-300 leading-relaxed">{editedInvestor.bio}</p>
                   )}
                 </section>
 
@@ -455,7 +455,7 @@ export function InvestorDetailModal({
                     />
                   ) : (
                     <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl italic text-zinc-300">
-                      "{investor.investmentThesis}"
+                      "{editedInvestor.investmentThesis}"
                     </div>
                   )}
                 </section>
@@ -472,7 +472,7 @@ export function InvestorDetailModal({
                       />
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {investor.focus.map(tag => (
+                        {editedInvestor.focus.map(tag => (
                           <span key={tag} className="px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-md text-sm">
                             {tag}
                           </span>
@@ -492,7 +492,7 @@ export function InvestorDetailModal({
                       />
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {investor.industryExpertise.map(tag => (
+                        {editedInvestor.industryExpertise.map(tag => (
                           <span key={tag} className="px-2 py-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-md text-sm">
                             {tag}
                           </span>
@@ -514,7 +514,7 @@ export function InvestorDetailModal({
                       />
                     ) : (
                       <ul className="list-disc list-inside text-zinc-300 space-y-1">
-                        {investor.notableInvestments.map(inv => (
+                        {editedInvestor.notableInvestments.map(inv => (
                           <li key={inv}>{inv}</li>
                         ))}
                       </ul>
@@ -532,7 +532,7 @@ export function InvestorDetailModal({
                           onChange={(e) => handleChange('location', e.target.value)}
                         />
                       ) : (
-                        <p className="text-zinc-300">{investor.location}</p>
+                        <p className="text-zinc-300">{editedInvestor.location}</p>
                       )}
                     </div>
                     <div>
@@ -544,7 +544,7 @@ export function InvestorDetailModal({
                           onChange={(e) => handleChange('investmentRange', e.target.value)}
                         />
                       ) : (
-                        <p className="text-zinc-300">{investor.investmentRange}</p>
+                        <p className="text-zinc-300">{editedInvestor.investmentRange}</p>
                       )}
                     </div>
                     <div>
@@ -574,7 +574,7 @@ export function InvestorDetailModal({
                           )}
                         </div>
                       ) : (
-                        <p className="text-zinc-300">{investor.contactPreference}</p>
+                        <p className="text-zinc-300">{editedInvestor.contactPreference}</p>
                       )}
                     </div>
                     {!isEditing && editedInvestor.contactVerificationStatus && (
@@ -594,8 +594,8 @@ export function InvestorDetailModal({
                           value={editedInvestor.email || ''}
                           onChange={(e) => handleChange('email', e.target.value)}
                         />
-                      ) : investor.email ? (
-                        <p className="text-zinc-300">{investor.email}</p>
+                      ) : editedInvestor.email ? (
+                        <p className="text-zinc-300">{editedInvestor.email}</p>
                       ) : (
                         <p className="text-zinc-500 italic">No public email saved</p>
                       )}
@@ -656,7 +656,7 @@ export function InvestorDetailModal({
               {/* Footer Actions */}
               <div className="p-6 border-t border-zinc-800 bg-zinc-900/30 flex justify-end">
                 <button
-                  onClick={() => onDraftOutreach(investor)}
+                  onClick={() => onDraftOutreach(editedInvestor)}
                   className="px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 transition-colors shadow-lg shadow-white/10"
                 >
                   Draft Outreach Email

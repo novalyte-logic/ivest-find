@@ -329,6 +329,63 @@ function normalizeInvestorRecord(
   };
 }
 
+function isLikelyIndividualInvestorRecord(record: Record<string, unknown>): boolean {
+  const name = stringValue(record.name).replace(/\s+/g, ' ').trim();
+  if (!name) {
+    return false;
+  }
+
+  const words = name.split(' ').filter(Boolean);
+  if (words.length < 2 || words.length > 5) {
+    return false;
+  }
+
+  const loweredName = name.toLowerCase();
+  const blockedNameTerms = [
+    'ventures',
+    'venture capital',
+    'capital',
+    'partners',
+    'fund',
+    'funds',
+    'management',
+    'group',
+    'network',
+    'studio',
+    'holdings',
+    'collective',
+    'syndicate',
+    'labs',
+    'accelerator',
+    'company',
+    'llc',
+    'inc',
+    'ltd',
+    'co-op',
+    'coop',
+  ];
+
+  if (blockedNameTerms.some((term) => loweredName.includes(term))) {
+    return false;
+  }
+
+  const role = stringValue(record.role).toLowerCase();
+  const blockedRoles = [
+    'venture capital firm',
+    'investment firm',
+    'fund',
+    'vc firm',
+    'platform',
+    'organization',
+  ];
+
+  if (blockedRoles.some((term) => role.includes(term))) {
+    return false;
+  }
+
+  return true;
+}
+
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -732,9 +789,11 @@ Rules:
 1. Use only the search documents below.
 2. Do not invent investors, firms, emails, portfolio companies, or claims.
 3. Prioritize investors that fit the Novalyte AI vault context.
-4. Return only real people or named investment decision-makers.
-5. Include sourceUrls only from the URLs explicitly listed in the search documents.
-6. If email is not explicitly public in the search documents, return an empty string.
+4. Return only real individual investors or named decision-makers.
+5. Do not return firms, funds, syndicates, platforms, or organizations as results.
+6. Favor solo angels, individual angel investors, scouts, solo GPs, and named partners or principals.
+7. Include sourceUrls only from the URLs explicitly listed in the search documents.
+8. If email is not explicitly public in the search documents, return an empty string.
 
 User search request:
 ${query}
@@ -778,7 +837,10 @@ ${searchBlock}`,
   });
 
   const parsed = JSON.parse(response.text || '[]') as Array<Record<string, unknown>>;
-  const investors = parsed.slice(0, limit).map((record) => normalizeInvestorRecord(record, provider));
+  const investors = parsed
+    .filter(isLikelyIndividualInvestorRecord)
+    .slice(0, limit)
+    .map((record) => normalizeInvestorRecord(record, provider));
   const sources = documents
     .filter((document) => document.url)
     .map((document) => ({
@@ -804,7 +866,7 @@ async function searchWithGoogleGrounding(
 
   const groundedResponse = await ai.models.generateContent({
     model: getSearchModel(),
-    contents: `Find real angel investors or venture capitalists who are a strong fit for Novalyte AI.
+    contents: `Find real individual angel investors, solo investors, solo GPs, scouts, or named decision-makers who are a strong fit for Novalyte AI.
 
 User search request:
 ${query}
@@ -814,12 +876,13 @@ ${vaultContext}
 
 Instructions:
 1. Prioritize investors whose thesis, portfolio, and recent public activity match the vault context.
-2. Prefer named partners, principals, angel investors, or managing partners.
+2. Prefer named individual investors such as angel investors, solo GPs, scouts, partners, principals, or managing partners.
 3. Do not invent investor details.
 4. Only include email if it is explicitly public.
 5. For each investor include sourceUrls from public sources used in grounding.
 6. Summarize latest news, pain points, and financial goals only if they are supported by recent public information.
-7. Return concise research notes in plain text. Organize them by investor and include the supporting source URLs inline.`,
+7. Do not return firms, funds, syndicates, or organizations as investor entries.
+8. Return concise research notes in plain text. Organize them by investor and include the supporting source URLs inline.`,
     config: {
       tools: [{ googleSearch: {} }],
     },
@@ -835,7 +898,8 @@ Rules:
 1. Use only the grounded notes below.
 2. Do not invent investors, firms, emails, or source URLs.
 3. Only include email if it is explicitly public in the notes.
-4. Return a JSON array only.
+4. Only return real individual investors, never firms or funds.
+5. Return a JSON array only.
 
 Grounded notes:
 ${groundedResponse.text || ''}`,
@@ -873,7 +937,7 @@ ${groundedResponse.text || ''}`,
   });
 
   const parsed = JSON.parse(structuringResponse.text || '[]') as Array<Record<string, unknown>>;
-  const investors = parsed.slice(0, limit).map((record) =>
+  const investors = parsed.filter(isLikelyIndividualInvestorRecord).slice(0, limit).map((record) =>
     normalizeInvestorRecord(
       {
         ...record,

@@ -25,6 +25,8 @@ services:
         sync: false
       - key: VITE_EXPLORIUM_API_KEY
         sync: false
+      - key: APOLLO_API_KEY
+        sync: false
       - key: OCEAN_API_KEY
         sync: false
       - key: RESEND_API_KEY
