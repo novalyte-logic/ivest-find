@@ -2,15 +2,12 @@ import { useState } from 'react';
 import { Investor } from '../data/investors';
 import { X, Send, Sparkles, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
+import { clientGemini as ai } from '../lib/env';
 
 interface OutreachModalProps {
   investor: Investor | null;
   onClose: () => void;
 }
-
-// Initialize Gemini API
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export function OutreachModal({ investor, onClose }: OutreachModalProps) {
   const [startupDetails, setStartupDetails] = useState(
@@ -23,6 +20,10 @@ export function OutreachModal({ investor, onClose }: OutreachModalProps) {
 
   const handleGenerate = async () => {
     if (!investor) return;
+    if (!ai) {
+      setGeneratedEmail("VITE_GEMINI_API_KEY is not configured.");
+      return;
+    }
     
     setIsGenerating(true);
     try {

@@ -1,7 +1,7 @@
 import { useState, useEffect, ChangeEvent } from 'react';
 import { Save, Database, Sparkles, Check, Clipboard, Search, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
+import { clientGemini as ai } from '../lib/env';
 
 interface VaultData {
   overview: string;
@@ -11,8 +11,6 @@ interface VaultData {
   usps: string;
   calendlyLink: string;
 }
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const DEFAULT_DATA: VaultData = {
   overview: "Novalyte AI is a pre-seed health tech startup focused on AI-driven diagnostics. We have developed a proprietary algorithm that detects early signs of anomalies with 99% accuracy.",
@@ -29,6 +27,11 @@ export function NovalyteVault() {
   const [isResearching, setIsResearching] = useState(false);
 
   const handleIndustryResearch = async () => {
+    if (!ai) {
+      alert("VITE_GEMINI_API_KEY is not configured.");
+      return;
+    }
+
     setIsResearching(true);
     try {
       const prompt = `

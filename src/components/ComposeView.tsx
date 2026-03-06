@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, Paperclip, Trash2, ThumbsUp, ThumbsDown, Loader2, FileText, ChevronDown, Users, Search, X, Bold, Italic, List, Link2, Type as TypeIcon, Smile, Calendar, Clock, Wand2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { format, addHours, addDays, startOfHour } from 'date-fns';
 import { Investor } from '../data/investors';
 import { Email } from '../data/emails';
+import { clientGemini as ai } from '../lib/env';
 
 interface ComposeViewProps {
   onSend?: (email: Partial<Email> & { scheduledFor?: string }) => void;
@@ -14,9 +14,6 @@ interface ComposeViewProps {
   initialDraft?: string;
   interestedInvestors: Investor[];
 }
-
-// Initialize Gemini API
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "re_FXPLjN5d_DpDbm2nd7xyj8trMj1Q5GEoq" });
 
 const EMAIL_TEMPLATES = [
   {
@@ -164,6 +161,11 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
   };
 
   const handleAiAction = async (action: 'generate' | 'refine' | 'subject') => {
+    if (!ai) {
+      alert("VITE_GEMINI_API_KEY is not configured.");
+      return;
+    }
+
     setIsGenerating(true);
     setFeedback(null);
     try {

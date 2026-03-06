@@ -8,15 +8,13 @@ import { SearchableDropdown } from './SearchableDropdown';
 import { Search, Filter, Activity, SortAsc, SortDesc, ChevronDown, Network, BrainCircuit, Globe, Loader2, Plus, CheckCircle2, X } from 'lucide-react';
 import { calculateMatchScore } from '../lib/matching';
 import { fuzzyMatch, parseInvestmentRange } from '../lib/utils';
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
+import { clientGemini as ai } from '../lib/env';
 
 type SortOption = 'match' | 'rangeAsc' | 'rangeDesc' | 'expertiseMatch';
 
 const NOVALYTE_EXPERTISE = ['Health Tech', 'AI', 'Diagnostics', 'AI/ML', 'Generative AI', 'Digital Health'];
-
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 interface InvestorFinderProps {
   onDraftOutreach: (investor: Investor) => void;
@@ -110,6 +108,11 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
 
   const handleWebSearch = async () => {
     if (!webSearchQuery.trim()) return;
+    if (!ai) {
+      alert("VITE_GEMINI_API_KEY is not configured.");
+      return;
+    }
+
     setIsWebSearching(true);
     try {
       const response = await ai.models.generateContent({

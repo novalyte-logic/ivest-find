@@ -9,7 +9,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: GEMINI_API_KEY
+      - key: VITE_GEMINI_API_KEY
+        sync: false
+      - key: VITE_VERTEX_AI_API_KEY
         sync: false
       - key: RESEND_API_KEY
         sync: false

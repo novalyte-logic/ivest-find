@@ -1,14 +1,14 @@
-import { GoogleGenAI } from "@google/genai";
-
-// Initialize the Gemini API client
-// The API key is injected by the environment
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+import { clientGemini as ai } from "./env";
 
 export async function generateOutreachEmail(
   investorName: string,
   investorFocus: string[],
   startupDetails: string
 ): Promise<string> {
+  if (!ai) {
+    return "VITE_GEMINI_API_KEY is not configured.";
+  }
+
   try {
     const prompt = `
       Act as a professional startup fundraiser.

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Investor } from '../data/investors';
 import { X, Save, Edit2, Trash2, Plus, Tag, Linkedin, ExternalLink, Sparkles, Search, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
+import { clientGemini as ai } from '../lib/env';
 
 interface InvestorDetailModalProps {
   investor: Investor | null;
@@ -13,8 +13,6 @@ interface InvestorDetailModalProps {
   onToggleInterested?: (investor: Investor) => void;
   isInterested?: boolean;
 }
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const CONTACT_PREFERENCES = ['Email', 'LinkedIn', 'Twitter / X', 'Warm Intro', 'Other'];
 
@@ -43,6 +41,11 @@ export function InvestorDetailModal({
   if (!investor || !editedInvestor) return null;
 
   const handleResearch = async () => {
+    if (!ai) {
+      alert("VITE_GEMINI_API_KEY is not configured.");
+      return;
+    }
+
     setIsResearching(true);
     try {
       const prompt = `
