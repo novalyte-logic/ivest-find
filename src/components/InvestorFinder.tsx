@@ -249,7 +249,8 @@ export function InvestorFinder({
   };
 
   const handleWebSearch = async (queryOverride?: string) => {
-    const finalQuery = queryOverride?.trim() || webSearchQuery.trim() || suggestedSearchQueries[0] || '';
+    const overrideQuery = typeof queryOverride === 'string' ? queryOverride.trim() : '';
+    const finalQuery = overrideQuery || webSearchQuery.trim() || suggestedSearchQueries[0] || '';
     if (!finalQuery) return;
 
     setWebSearchQuery(finalQuery);
@@ -729,12 +730,12 @@ export function InvestorFinder({
                     placeholder={suggestedSearchQueries[0] || "e.g. 'Health tech angel investors in London'..."}
                     value={webSearchQuery}
                     onChange={(e) => setWebSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleWebSearch()}
+                    onKeyDown={(e) => e.key === 'Enter' && void handleWebSearch()}
                     className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                   />
                 </div>
                 <button 
-                  onClick={handleWebSearch}
+                  onClick={() => void handleWebSearch()}
                   disabled={isWebSearching || (!webSearchQuery.trim() && suggestedSearchQueries.length === 0)}
                   className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2"
                 >
