@@ -91,6 +91,9 @@ export function InvestorFinder({
   const [selectedContactPref, setSelectedContactPref] = useState<string>('');
   const [thesisSearch, setThesisSearch] = useState<string>('');
 
+  const normalizeSearchQuery = (value: unknown) =>
+    typeof value === 'string' ? value.trim() : '';
+
   useEffect(() => {
     setVaultData(loadVaultData());
     return subscribeToVaultChanges(setVaultData);
@@ -244,13 +247,15 @@ export function InvestorFinder({
   };
 
   const handleOpenSmartSearch = (query: string) => {
-    setWebSearchQuery(query);
+    setWebSearchQuery(normalizeSearchQuery(query));
     setShowWebSearchModal(true);
   };
 
   const handleWebSearch = async (queryOverride?: string) => {
-    const overrideQuery = typeof queryOverride === 'string' ? queryOverride.trim() : '';
-    const finalQuery = overrideQuery || webSearchQuery.trim() || suggestedSearchQueries[0] || '';
+    const overrideQuery = normalizeSearchQuery(queryOverride);
+    const draftQuery = normalizeSearchQuery(webSearchQuery);
+    const fallbackQuery = normalizeSearchQuery(suggestedSearchQueries[0]);
+    const finalQuery = overrideQuery || draftQuery || fallbackQuery;
     if (!finalQuery) return;
 
     setWebSearchQuery(finalQuery);
@@ -455,6 +460,7 @@ export function InvestorFinder({
             <div className="flex flex-wrap gap-2">
               {suggestedSearchQueries.map((query) => (
                 <button
+                  type="button"
                   key={query}
                   onClick={() => handleOpenSmartSearch(query)}
                   className="rounded-full border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-left text-xs font-medium text-zinc-300 transition-colors hover:border-blue-500/40 hover:text-white"
@@ -729,14 +735,15 @@ export function InvestorFinder({
                     type="text"
                     placeholder={suggestedSearchQueries[0] || "e.g. 'Health tech angel investors in London'..."}
                     value={webSearchQuery}
-                    onChange={(e) => setWebSearchQuery(e.target.value)}
+                    onChange={(e) => setWebSearchQuery(normalizeSearchQuery(e.target.value))}
                     onKeyDown={(e) => e.key === 'Enter' && void handleWebSearch()}
                     className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                   />
                 </div>
                 <button 
+                  type="button"
                   onClick={() => void handleWebSearch()}
-                  disabled={isWebSearching || (!webSearchQuery.trim() && suggestedSearchQueries.length === 0)}
+                  disabled={isWebSearching || (!normalizeSearchQuery(webSearchQuery) && suggestedSearchQueries.length === 0)}
                   className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2"
                 >
                   {isWebSearching ? <Loader2 className="animate-spin" size={18} /> : <Globe size={18} />}
@@ -748,8 +755,9 @@ export function InvestorFinder({
                 <div className="max-h-28 overflow-y-auto px-6 pb-4 flex flex-wrap gap-2">
                   {suggestedSearchQueries.slice(0, 6).map((query) => (
                     <button
+                      type="button"
                       key={query}
-                      onClick={() => setWebSearchQuery(query)}
+                      onClick={() => setWebSearchQuery(normalizeSearchQuery(query))}
                       className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
                     >
                       {query}
