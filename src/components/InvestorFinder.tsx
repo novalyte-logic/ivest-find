@@ -11,10 +11,9 @@ import { fuzzyMatch, parseInvestmentRange } from '../lib/utils';
 import { Type } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 import { clientGemini as ai } from '../lib/env';
+import { buildVaultPromptContext, countVaultKeywordMatches, getVaultInvestorKeywords, loadVaultData, subscribeToVaultChanges, VaultData } from '../lib/vault';
 
 type SortOption = 'match' | 'rangeAsc' | 'rangeDesc' | 'expertiseMatch';
-
-const NOVALYTE_EXPERTISE = ['Health Tech', 'AI', 'Diagnostics', 'AI/ML', 'Generative AI', 'Digital Health'];
 
 interface InvestorFinderProps {
   onDraftOutreach: (investor: Investor) => void;
@@ -25,6 +24,7 @@ interface InvestorFinderProps {
 export function InvestorFinder({ onDraftOutreach, onToggleInterested, interestedIds }: InvestorFinderProps) {
   const [investors, setInvestors] = useState<Investor[]>(initialInvestors);
   const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
+  const [vaultData, setVaultData] = useState<VaultData>(() => loadVaultData());
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOption, setSortOption] = useState<SortOption>('match');
   const [showFilters, setShowFilters] = useState(false);
@@ -42,11 +42,17 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
   const [selectedContactPref, setSelectedContactPref] = useState<string>('');
   const [thesisSearch, setThesisSearch] = useState<string>('');
 
+  useEffect(() => {
+    setVaultData(loadVaultData());
+    return subscribeToVaultChanges(setVaultData);
+  }, []);
+
   // Derived lists for filter dropdowns
   const allFocusAreas = useMemo(() => Array.from(new Set(investors.flatMap(i => i.focus))), [investors]);
   const allLocations = useMemo(() => Array.from(new Set(investors.map(i => i.location))), [investors]);
   const allStages = useMemo(() => Array.from(new Set(investors.map(i => i.stage))), [investors]);
   const allContactPrefs = useMemo(() => Array.from(new Set(investors.map(i => i.contactPreference))).filter(Boolean), [investors]);
+  const companyKeywords = useMemo(() => getVaultInvestorKeywords(vaultData), [vaultData]);
 
   const filteredInvestors = useMemo(() => {
     let result = investors.filter(inv => {
@@ -76,23 +82,40 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
     // Sorting
     result = result.sort((a, b) => {
       if (sortOption === 'match') {
-        const scoreA = calculateMatchScore(a).score;
-        const scoreB = calculateMatchScore(b).score;
+        const scoreA = calculateMatchScore(a, vaultData).score;
+        const scoreB = calculateMatchScore(b, vaultData).score;
         return scoreB - scoreA;
       } else if (sortOption === 'rangeAsc') {
         return parseInvestmentRange(a.investmentRange) - parseInvestmentRange(b.investmentRange);
       } else if (sortOption === 'rangeDesc') {
         return parseInvestmentRange(b.investmentRange) - parseInvestmentRange(a.investmentRange);
       } else if (sortOption === 'expertiseMatch') {
-        const countA = a.industryExpertise.filter(exp => NOVALYTE_EXPERTISE.some(ne => exp.includes(ne) || ne.includes(exp))).length;
-        const countB = b.industryExpertise.filter(exp => NOVALYTE_EXPERTISE.some(ne => exp.includes(ne) || ne.includes(exp))).length;
+        const countA = countVaultKeywordMatches(
+          [...a.industryExpertise, ...a.focus, a.investmentThesis].join(' '),
+          companyKeywords,
+        );
+        const countB = countVaultKeywordMatches(
+          [...b.industryExpertise, ...b.focus, b.investmentThesis].join(' '),
+          companyKeywords,
+        );
         return countB - countA;
       }
       return 0;
     });
 
     return result;
-  }, [investors, searchTerm, sortOption, selectedFocus, selectedLocation, selectedStage]);
+  }, [
+    companyKeywords,
+    investors,
+    searchTerm,
+    selectedContactPref,
+    selectedFocus,
+    selectedLocation,
+    selectedStage,
+    sortOption,
+    thesisSearch,
+    vaultData,
+  ]);
 
   const handleUpdateInvestor = (updatedInvestor: Investor) => {
     setInvestors(prev => prev.map(inv => inv.id === updatedInvestor.id ? updatedInvestor : inv));
@@ -115,13 +138,27 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
 
     setIsWebSearching(true);
     try {
+      const vaultContext = buildVaultPromptContext(vaultData, {
+        documentLimit: 5,
+        charsPerDocument: 900,
+      });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Find real angel investors or venture capitalists who invest in ${webSearchQuery}. 
-        Focus on those interested in Health Tech, AI, and Diagnostics.
-        Return a JSON array of investors with these fields: 
+        contents: `Find real angel investors or venture capitalists who are a strong fit for Novalyte AI.
+
+        User search request: ${webSearchQuery}
+
+        Company source-of-truth:
+        ${vaultContext}
+
+        Instructions:
+        1. Prioritize investors whose thesis, past portfolio, and stated interests match the company context above.
+        2. Prefer real people and real firms with recent public evidence of activity.
+        3. Use the company source-of-truth instead of generic health tech assumptions.
+        4. Do not invent investor details. If something cannot be supported from public info, omit it.
+        5. Return a JSON array of investors with these fields:
         name, role, firm, bio, focus (array), location, investmentRange, investmentThesis, stage (Pre-Seed, Seed, Series A, or Late Stage), linkedinUrl.
-        Make the data as realistic as possible based on web information.`,
+        6. Keep each bio and thesis factual and concise.`,
         config: {
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
@@ -214,7 +251,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
 
       {/* Top Matches Widget */}
       {!searchTerm && !selectedFocus && !selectedLocation && !selectedStage && !selectedContactPref && !thesisSearch && (
-        <TopMatches investors={investors} onSelect={setSelectedInvestor} />
+        <TopMatches investors={investors} onSelect={setSelectedInvestor} vaultData={vaultData} />
       )}
 
       {/* Controls Section */}
@@ -351,6 +388,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
               onAddTag={handleAddTag}
               onToggleInterested={onToggleInterested}
               isInterested={interestedIds.has(investor.id)}
+              vaultData={vaultData}
             />
           </div>
         ))}

@@ -3,6 +3,7 @@ import { Investor } from '../data/investors';
 import { MapPin, DollarSign, ArrowRight, Sparkles, Clock, Star } from 'lucide-react';
 import { motion } from 'motion/react';
 import { calculateMatchScore } from '../lib/matching';
+import { VaultData } from '../lib/vault';
 
 interface InvestorCardProps {
   investor: Investor;
@@ -10,10 +11,11 @@ interface InvestorCardProps {
   onAddTag: (investor: Investor, tag: string) => void;
   onToggleInterested?: (investor: Investor) => void;
   isInterested?: boolean;
+  vaultData: VaultData;
 }
 
-export function InvestorCard({ investor, onSelect, onAddTag, onToggleInterested, isInterested }: InvestorCardProps) {
-  const match = calculateMatchScore(investor);
+export function InvestorCard({ investor, onSelect, onAddTag, onToggleInterested, isInterested, vaultData }: InvestorCardProps) {
+  const match = calculateMatchScore(investor, vaultData);
 
   const handleToggleInterested = (e: MouseEvent) => {
     e.stopPropagation();

@@ -7,6 +7,7 @@ import { format, addHours, addDays, startOfHour } from 'date-fns';
 import { Investor } from '../data/investors';
 import { Email } from '../data/emails';
 import { clientGemini as ai } from '../lib/env';
+import { buildVaultPromptContext, loadVaultData } from '../lib/vault';
 
 interface ComposeViewProps {
   onSend?: (email: Partial<Email> & { scheduledFor?: string }) => void;
@@ -169,59 +170,60 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
     setIsGenerating(true);
     setFeedback(null);
     try {
-      const vaultDataStr = localStorage.getItem('novalyte_vault');
-      const vaultData = vaultDataStr ? JSON.parse(vaultDataStr) : {};
-      
-      const context = `
-        **My Startup Context (Novalyte AI):**
-        - Overview: ${vaultData.overview || "Novalyte AI is a pre-seed health tech startup..."}
-        - Traction: ${vaultData.traction || "Product is live..."}
-        - The Ask: ${vaultData.ask || "Seeking pre-seed funding..."}
-        - USPs: ${vaultData.usps || "Proprietary AI..."}
-        - Recent Updates: ${vaultData.updates || "We recently achieved [Metric] and are expanding our pilot programs."}
-      `;
+      const vaultData = loadVaultData();
+      const context = buildVaultPromptContext(vaultData, {
+        documentLimit: 5,
+        charsPerDocument: 1000,
+      });
 
       let prompt = '';
       if (action === 'generate') {
-        prompt = `Draft a professional outreach email based on this request: "${aiPrompt}". 
-        
-        **CRITICAL INSTRUCTIONS:**
-        1. Use Google Search to find REAL, RECENT news or updates about the target investor or their firm.
-        2. Deeply research the investor's specific industry expertise and past investments. Tailor the outreach to show we understand their thesis (e.g., if they focus on Biotech, emphasize our diagnostic engine's biological implications; if they focus on SaaS, emphasize our recurring revenue and scale).
-        3. Reference a recent investment or public statement they made if possible.
-        4. Incorporate our "Recent Updates" to show momentum.
-        5. Keep it concise, punchy, and professional.
-        
+        prompt = `Draft a professional investor outreach email for Novalyte AI based on this request: "${aiPrompt}".
+
+        Critical instructions:
+        1. Treat the company vault below as the source of truth for Novalyte AI.
+        2. Do not invent traction, metrics, customers, pilots, partnerships, or claims that are not present in the vault.
+        3. If a target investor profile is provided, use Google Search to find recent, factual context about that investor or firm and tailor the email to their thesis.
+        4. Use the strongest proof points from the vault when they are relevant.
+        5. Keep the email concise, credible, and written for a real investor.
+        6. Return only the email body as HTML.
+
+        Company vault:
         ${context}`;
       } else if (action === 'refine') {
-        prompt = `Refine and improve this email body to be more compelling and professional: "${body}". 
-        
-        **INSTRUCTIONS:**
-        1. Make it more personalized to the target investor if profile is provided.
-        2. Improve the flow and clarity.
-        3. Ensure the call to action is clear.
-        
+        prompt = `Refine and improve this investor outreach email body: "${body}".
+
+        Instructions:
+        1. Keep the company facts aligned with the vault below.
+        2. Do not add claims that are not supported by the vault.
+        3. Make it more personalized to the target investor if a profile is provided.
+        4. Improve clarity, confidence, and the call to action.
+        5. Return only the email body as HTML.
+
+        Company vault:
         ${context}`;
       } else if (action === 'subject') {
-        prompt = `Suggest 3 compelling, high-open-rate subject lines for an email with this body: "${body}". 
-        
-        **INSTRUCTIONS:**
+        prompt = `Suggest 3 compelling subject lines for this investor email body: "${body}".
+
+        Instructions:
         1. Use the target investor's firm name or focus area if provided.
-        2. Make them sound personal, not like automated spam.
-        3. Return ONLY the 3 subject lines separated by newlines.
-        
+        2. Keep them personal and credible, not spammy.
+        3. Align them with the company vault below.
+        4. Return only the 3 subject lines separated by newlines.
+
+        Company vault:
         ${context}`;
       }
 
       if (selectedInvestor) {
-        prompt += `\n**Target Investor Profile:** 
+        prompt += `\nTarget investor profile:
         - Name: ${selectedInvestor.name}
         - Firm: ${selectedInvestor.firm}
         - Focus: ${selectedInvestor.focus.join(', ')}
         - Bio: ${selectedInvestor.bio}`;
       }
 
-      prompt += `\nReturn the response in plain text (or HTML if it's the email body).`;
+      prompt += `\nKeep the response grounded in the provided information.`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",

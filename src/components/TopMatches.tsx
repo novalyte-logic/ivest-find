@@ -1,16 +1,18 @@
 import { Investor } from '../data/investors';
 import { calculateMatchScore } from '../lib/matching';
+import { VaultData } from '../lib/vault';
 import { Sparkles, ArrowRight } from 'lucide-react';
 
 interface TopMatchesProps {
   investors: Investor[];
   onSelect: (investor: Investor) => void;
+  vaultData: VaultData;
 }
 
-export function TopMatches({ investors, onSelect }: TopMatchesProps) {
+export function TopMatches({ investors, onSelect, vaultData }: TopMatchesProps) {
   // Get top 5 investors based on match score
   const topInvestors = [...investors]
-    .sort((a, b) => calculateMatchScore(b).score - calculateMatchScore(a).score)
+    .sort((a, b) => calculateMatchScore(b, vaultData).score - calculateMatchScore(a, vaultData).score)
     .slice(0, 5);
 
   return (
@@ -22,7 +24,7 @@ export function TopMatches({ investors, onSelect }: TopMatchesProps) {
       
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {topInvestors.map((investor, index) => {
-          const match = calculateMatchScore(investor);
+          const match = calculateMatchScore(investor, vaultData);
           return (
             <div 
               key={investor.id}

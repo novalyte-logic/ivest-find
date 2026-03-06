@@ -6,12 +6,18 @@ import { NovalyteVault } from './components/NovalyteVault';
 import { InvestorDetailModal } from './components/InvestorDetailModal';
 import { ComposeView } from './components/ComposeView';
 import { EmailDetail } from './components/EmailDetail';
+import { AccessGate } from './components/AccessGate';
 import { initialEmails, Email } from './data/emails';
 import { Investor } from './data/investors';
 import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 type View = 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose';
+
+const MAILBOX_FROM_EMAIL =
+  import.meta.env.VITE_SMTP_FROM_EMAIL ||
+  import.meta.env.VITE_MAIL_FROM_EMAIL ||
+  'novalyte-ai@echoclips.dev';
 
 export default function App() {
   const [activeView, setActiveView] = useState<View>('finder');
@@ -20,8 +26,40 @@ export default function App() {
   const [interestedInvestors, setInterestedInvestors] = useState<Investor[]>([]);
   const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [hasAccess, setHasAccess] = useState(false);
+  const [isAccessLoaded, setIsAccessLoaded] = useState(false);
 
-  // Load data from localStorage
+  useEffect(() => {
+    let isCancelled = false;
+
+    const checkAccess = async () => {
+      try {
+        const response = await fetch('/api/access/status', {
+          credentials: 'include',
+        });
+        const result = await response.json();
+        if (!isCancelled) {
+          setHasAccess(Boolean(result.authenticated));
+        }
+      } catch (error) {
+        console.error('Failed to load access state', error);
+        if (!isCancelled) {
+          setHasAccess(false);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsAccessLoaded(true);
+        }
+      }
+    };
+
+    checkAccess();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     const savedInvestors = localStorage.getItem('interested_investors');
     if (savedInvestors) {
@@ -42,7 +80,6 @@ export default function App() {
     }
   }, []);
 
-  // Persist data to localStorage
   useEffect(() => {
     localStorage.setItem('interested_investors', JSON.stringify(interestedInvestors));
   }, [interestedInvestors]);
@@ -68,6 +105,25 @@ export default function App() {
     setSelectedEmail(null);
     setActiveView('compose');
     setIsSidebarOpen(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/access/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('Failed to clear access session', error);
+    } finally {
+      setHasAccess(false);
+      setIsSidebarOpen(false);
+      setSelectedInvestor(null);
+      setSelectedEmail(null);
+      setComposeInitialInvestor(null);
+      setComposeInitialDraft('');
+      setActiveView('finder');
+    }
   };
 
   const handleNavigate = (view: View) => {
@@ -120,7 +176,7 @@ export default function App() {
 
       const newEmail: Email = {
         id: `sent-${Date.now()}`,
-        from: 'me@novalyte.ai',
+        from: MAILBOX_FROM_EMAIL,
         to: email.to || '',
         subject: email.subject || '',
         body: email.body || '',
@@ -173,6 +229,14 @@ export default function App() {
 
   const filteredEmails = emails.filter(e => e.folder === activeView);
 
+  if (!isAccessLoaded) {
+    return <div className="min-h-screen bg-black" />;
+  }
+
+  if (!hasAccess) {
+    return <AccessGate onUnlock={() => setHasAccess(true)} />;
+  }
+
   return (
     <div className="min-h-screen bg-black text-white font-sans flex flex-col md:flex-row">
       {/* Mobile Header */}
@@ -198,6 +262,7 @@ export default function App() {
           activeView={activeView} 
           onNavigate={handleNavigate} 
           onCompose={handleCompose}
+          onLogout={handleLogout}
           unreadCount={unreadCount}
         />
       </div>
