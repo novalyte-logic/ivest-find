@@ -16,6 +16,27 @@ interface SearchDocument {
   text: string;
 }
 
+interface OceanPersonResult {
+  id?: string;
+  name?: string;
+  fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  title?: string;
+  seniority?: string;
+  linkedinHandle?: string;
+  linkedinUrl?: string;
+  country?: string;
+  city?: string;
+  company?: {
+    name?: string;
+    domain?: string;
+    website?: string;
+    description?: string;
+    linkedinHandle?: string;
+  };
+}
+
 const MAX_SOURCE_RESULTS = 8;
 const MAX_SOURCE_TEXT = 1800;
 
@@ -99,6 +120,13 @@ function getSearchProviderOptions(): ProviderOption<SearchProvider>[] {
       label: 'Explorium',
       description: 'Prospect data search for investor and fund decision-maker discovery.',
       configured: Boolean(getEnvAny('EXPLORIUM_API_KEY', 'VITE_EXPLORIUM_API_KEY')),
+      implemented: true,
+    },
+    {
+      id: 'ocean',
+      label: 'Ocean',
+      description: 'Ocean people search for investor and lookalike discovery.',
+      configured: Boolean(getSafeEnv('OCEAN_API_KEY')),
       implemented: true,
     },
   ];
@@ -564,6 +592,86 @@ async function searchWithFirecrawl(query: string, limit: number): Promise<Search
   }));
 }
 
+function inferOceanCountries(query: string): string[] {
+  const normalized = query.toLowerCase();
+  if (normalized.includes('uk') || normalized.includes('united kingdom') || normalized.includes('london')) {
+    return ['United Kingdom'];
+  }
+  if (normalized.includes('europe') || normalized.includes('eu')) {
+    return ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Switzerland'];
+  }
+  if (normalized.includes('mena') || normalized.includes('middle east')) {
+    return ['United Arab Emirates', 'Saudi Arabia', 'Egypt'];
+  }
+  return ['United States', 'Canada'];
+}
+
+async function searchWithOcean(query: string, limit: number): Promise<SearchDocument[]> {
+  requireConfiguredProvider(getSearchProviderOptions(), 'ocean');
+  const apiKey = getSafeEnv('OCEAN_API_KEY');
+
+  const response = await fetchJson<{ people?: OceanPersonResult[] }>(
+    'https://api.ocean.io/v3/search/people',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-token': apiKey,
+      },
+      body: JSON.stringify({
+        size: Math.max(limit * 4, 24),
+        peoplePerCompany: 1,
+        peopleFilters: {
+          countries: inferOceanCountries(query),
+          seniorities: ['Partner', 'Founder', 'Board Member', 'C-Level', 'VP'],
+        },
+      }),
+    },
+  );
+
+  return (response.people || []).map((result) => {
+    const fullName =
+      optionalStringValue(result.fullName || result.name) ||
+      [optionalStringValue(result.firstName), optionalStringValue(result.lastName)]
+        .filter(Boolean)
+        .join(' ');
+    const currentExperience =
+      Array.isArray((result as Record<string, unknown>).experiences)
+        ? (((result as Record<string, unknown>).experiences as unknown[])[0] as Record<string, unknown> | undefined)
+        : undefined;
+    const companyName =
+      optionalStringValue(result.company?.name) ||
+      optionalStringValue(currentExperience?.domain);
+    const companyDomain =
+      optionalStringValue(result.company?.domain) ||
+      normalizeDomain(
+        optionalStringValue(result.company?.website) ||
+        optionalStringValue((result as Record<string, unknown>).domain) ||
+        optionalStringValue(currentExperience?.domain),
+      );
+    const linkedinUrl =
+      optionalStringValue(result.linkedinUrl) ||
+      (optionalStringValue(result.linkedinHandle)
+        ? `https://www.linkedin.com/in/${optionalStringValue(result.linkedinHandle)}`
+        : '');
+
+    return {
+      title: [fullName, companyName ? `at ${companyName}` : ''].filter(Boolean).join(' '),
+      url: linkedinUrl || (companyDomain ? `https://${companyDomain}` : ''),
+      text: [
+        `Name: ${fullName || 'Unknown'}`,
+        `Title: ${optionalStringValue(result.title) || optionalStringValue((result as Record<string, unknown>).jobTitle) || optionalStringValue(result.seniority) || 'Unknown'}`,
+        `Company: ${companyName || 'Unknown'}`,
+        `Location: ${optionalStringValue((result as Record<string, unknown>).location) || [optionalStringValue(result.city), optionalStringValue(result.country)].filter(Boolean).join(', ') || 'Unknown'}`,
+        `Company domain: ${companyDomain || 'Unknown'}`,
+        `Current job: ${optionalStringValue((result as Record<string, unknown>).currentJobDescription) || 'Not available'}`,
+        `Company description: ${optionalStringValue(result.company?.description) || 'Not available'}`,
+        `Search intent: ${query}`,
+      ].join('\n'),
+    };
+  });
+}
+
 async function searchDocumentsWithProvider(
   query: string,
   provider: Exclude<SearchProvider, 'google-grounded'>,
@@ -575,6 +683,10 @@ async function searchDocumentsWithProvider(
 
   if (provider === 'explorium') {
     return searchWithExplorium(query, limit);
+  }
+
+  if (provider === 'ocean') {
+    return searchWithOcean(query, limit);
   }
 
   return searchWithFirecrawl(query, limit);

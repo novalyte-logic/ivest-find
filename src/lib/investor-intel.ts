@@ -4,7 +4,8 @@ export type SearchProvider =
   | 'google-grounded'
   | 'exa'
   | 'firecrawl'
-  | 'explorium';
+  | 'explorium'
+  | 'ocean';
 export type ContactProvider =
   | 'none'
   | 'google-grounded'
@@ -104,7 +105,8 @@ export function isSearchProvider(value: unknown): value is SearchProvider {
     value === 'google-grounded' ||
     value === 'exa' ||
     value === 'firecrawl' ||
-    value === 'explorium'
+    value === 'explorium' ||
+    value === 'ocean'
   );
 }
 

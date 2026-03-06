@@ -344,7 +344,7 @@ async function startServer() {
     try {
       const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
       const searchProvider = req.body?.searchProvider;
-      const limit = typeof req.body?.limit === "number" ? req.body.limit : 8;
+      const limit = typeof req.body?.limit === "number" ? req.body.limit : 11;
       const rawVault = typeof req.body?.vaultData === "object" && req.body.vaultData !== null
         ? req.body.vaultData
         : loadVaultData();

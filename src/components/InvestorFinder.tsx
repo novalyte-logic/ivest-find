@@ -266,7 +266,7 @@ export function InvestorFinder({
         body: JSON.stringify({
           query: finalQuery,
           searchProvider: providerPreferences.searchProvider,
-          limit: 8,
+          limit: 11,
           vaultData,
         }),
       });
