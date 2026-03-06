@@ -17,8 +17,8 @@ import { parseJsonResponse } from './lib/http';
 type View = 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose';
 
 const MAILBOX_FROM_EMAIL =
-  import.meta.env.VITE_SMTP_FROM_EMAIL ||
   import.meta.env.VITE_MAIL_FROM_EMAIL ||
+  import.meta.env.VITE_SMTP_FROM_EMAIL ||
   'novalyte-ai@echoclips.dev';
 const MAILBOX_FROM = MAILBOX_FROM_EMAIL.includes('<')
   ? MAILBOX_FROM_EMAIL

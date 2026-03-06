@@ -17,3 +17,11 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
+      - key: RESEND_FROM_NAME
+        sync: false
+      - key: RESEND_REPLY_TO
+        sync: false
+      - key: VITE_MAIL_FROM_EMAIL
+        sync: false
+      - key: FOLLOW_UP_GEMINI_MODEL
+        sync: false

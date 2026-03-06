@@ -15,13 +15,14 @@ import {
   loadCustomTemplates,
   saveCustomTemplates,
 } from '../lib/template-library';
+import { parseJsonResponse } from '../lib/http';
 import { buildVaultPromptContext, loadVaultData, subscribeToVaultChanges, VaultData } from '../lib/vault';
 import { InvestorAvatar } from './InvestorAvatar';
 
 const BRAND_NAME = 'Novalyte AI';
 const SENDER_EMAIL =
-  import.meta.env.VITE_SMTP_FROM_EMAIL ||
   import.meta.env.VITE_MAIL_FROM_EMAIL ||
+  import.meta.env.VITE_SMTP_FROM_EMAIL ||
   'novalyte-ai@echoclips.dev';
 const SENDER_IDENTITY = SENDER_EMAIL.includes('<')
   ? SENDER_EMAIL
@@ -386,7 +387,48 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
     setTemplateNotice('Template deleted');
   };
 
-  const handleAiAction = async (action: 'generate' | 'refine' | 'subject') => {
+  const handleAiAction = async (action: 'generate' | 'refine' | 'subject' | 'follow-up') => {
+    if (action === 'follow-up') {
+      setIsGenerating(true);
+      setFeedback(null);
+
+      try {
+        const response = await fetch('/api/ai/follow-up', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            subject,
+            body,
+            instruction: aiPrompt,
+            investor: selectedInvestor,
+            vaultData,
+          }),
+        });
+
+        const result = await parseJsonResponse<{
+          provider: string;
+          subject: string;
+          body: string;
+        }>(response);
+
+        setSubject(result.subject);
+        setBody(result.body);
+        setAiPrompt('');
+        setTemplateNotice('Vertex follow-up draft ready');
+      } catch (error) {
+        console.error('Follow-up AI error:', error);
+        alert(error instanceof Error ? error.message : 'Failed to generate a follow-up email.');
+      } finally {
+        setIsGenerating(false);
+      }
+
+      return;
+    }
+
     if (!ai) {
       alert("VITE_GEMINI_API_KEY is not configured.");
       return;
@@ -935,13 +977,20 @@ export function ComposeView({ onSend, initialInvestor, initialDraft, interestedI
                 </div>
                 <input 
                   type="text"
-                  placeholder="Ask Gemini to draft, refine, or research..."
+                  placeholder="Ask AI to draft, refine, or create a follow-up..."
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAiAction('generate')}
                   className="flex-1 bg-transparent text-sm text-white focus:outline-none"
                 />
                 <div className="compose-ai-actions flex items-center gap-1">
+                  <button 
+                    onClick={() => handleAiAction('follow-up')}
+                    disabled={isGenerating}
+                    className="px-3 py-2 text-zinc-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl text-xs font-bold transition-all disabled:opacity-30"
+                  >
+                    Follow Up
+                  </button>
                   <button 
                     onClick={() => handleAiAction('refine')}
                     disabled={isGenerating || !body}

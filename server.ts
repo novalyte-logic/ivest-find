@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { Resend } from "resend";
 import dotenv from "dotenv";
 import nodemailer, { Transporter } from "nodemailer";
+import { generateFollowUpEmail } from "./src/server/follow-up-email-service";
 import {
   enrichInvestorResearch,
   getInvestorIntelProviderStatus,
@@ -172,6 +173,86 @@ async function startServer() {
     return `${getSenderName()} <${trimmed}>`;
   };
 
+  const getSmtpFromAddress = () =>
+    process.env.SMTP_FROM_EMAIL ||
+    process.env.SMTP_USER ||
+    process.env.RESEND_FROM_EMAIL;
+
+  const getSmtpReplyToAddress = () =>
+    process.env.SMTP_REPLY_TO ||
+    getSmtpFromAddress() ||
+    undefined;
+
+  const getResendFromAddress = () =>
+    process.env.RESEND_FROM_EMAIL ||
+    process.env.SMTP_FROM_EMAIL ||
+    process.env.SMTP_USER;
+
+  const getResendReplyToAddress = () =>
+    process.env.RESEND_REPLY_TO ||
+    process.env.SMTP_REPLY_TO ||
+    getResendFromAddress() ||
+    undefined;
+
+  const hasResendConfig = () =>
+    Boolean(process.env.RESEND_API_KEY && getResendFromAddress());
+
+  const sendWithSmtp = async ({
+    to,
+    subject,
+    body,
+  }: {
+    to: string;
+    subject: string;
+    body: string;
+  }) => {
+    const smtp = getSmtp();
+    const data = await smtp.sendMail({
+      from: formatSenderAddress(getSmtpFromAddress()),
+      to,
+      subject,
+      html: body,
+      replyTo: getSmtpReplyToAddress(),
+    });
+
+    return { success: true, provider: "smtp" as const, data };
+  };
+
+  const sendWithResend = async ({
+    to,
+    subject,
+    body,
+  }: {
+    to: string;
+    subject: string;
+    body: string;
+  }) => {
+    const resend = getResend();
+    const resendFromAddress = getResendFromAddress();
+
+    if (!resendFromAddress) {
+      throw new Error("A Resend sender email address is not configured.");
+    }
+
+    const { data, error } = await resend.emails.send({
+      from: formatSenderAddress(resendFromAddress),
+      to: [to],
+      subject,
+      html: body,
+      replyTo: getResendReplyToAddress(),
+    });
+
+    if (error) {
+      const errorMessage =
+        typeof error === "object" && error !== null && "message" in error
+          ? (error as { message: string }).message
+          : JSON.stringify(error);
+      throw new Error(errorMessage);
+    }
+
+    return { success: true, provider: "resend" as const, data };
+  };
+
   app.use(express.json());
 
   // API routes
@@ -202,68 +283,56 @@ async function startServer() {
 
   app.post("/api/send-email", requireAccess, async (req, res) => {
     const { to, subject, body } = req.body;
+    const transportPreference =
+      typeof req.body?.transport === "string" ? req.body.transport : "auto";
 
     if (!to || !subject || !body) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     try {
+      if (transportPreference === "resend") {
+        return res.json(await sendWithResend({ to, subject, body }));
+      }
+
+      if (transportPreference === "smtp") {
+        return res.json(await sendWithSmtp({ to, subject, body }));
+      }
+
+      const errors: string[] = [];
+
+      if (hasResendConfig()) {
+        try {
+          return res.json(await sendWithResend({ to, subject, body }));
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown Resend error";
+          console.error("Resend send error:", message);
+          errors.push(`Resend: ${message}`);
+        }
+      }
+
       if (hasSmtpConfig()) {
-        const smtp = getSmtp();
-        const fromAddress =
-          process.env.SMTP_FROM_EMAIL ||
-          process.env.SMTP_USER ||
-          process.env.RESEND_FROM_EMAIL;
-        const replyToAddress =
-          process.env.SMTP_REPLY_TO ||
-          process.env.SMTP_FROM_EMAIL ||
-          process.env.SMTP_USER ||
-          undefined;
-
-        const data = await smtp.sendMail({
-          from: formatSenderAddress(fromAddress),
-          to,
-          subject,
-          html: body,
-          replyTo: replyToAddress,
-        });
-
-        return res.json({ success: true, provider: "smtp", data });
+        try {
+          return res.json(await sendWithSmtp({ to, subject, body }));
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown SMTP error";
+          console.error("SMTP send error:", message);
+          errors.push(`SMTP: ${message}`);
+        }
       }
 
-      const resend = getResend();
-      const resendFromAddress =
-        process.env.RESEND_FROM_EMAIL ||
-        process.env.SMTP_FROM_EMAIL ||
-        process.env.SMTP_USER;
-
-      if (!resendFromAddress) {
-        throw new Error("A sender email address is not configured.");
+      if (errors.length > 0) {
+        return res.status(502).json({ error: errors.join(" | ") });
       }
 
-      const { data, error } = await resend.emails.send({
-        from: formatSenderAddress(resendFromAddress),
-        to: [to],
-        subject: subject,
-        html: body,
-        replyTo:
-          process.env.SMTP_REPLY_TO ||
-          process.env.RESEND_FROM_EMAIL ||
-          undefined,
-      });
-
-      if (error) {
-        console.error("Resend error:", JSON.stringify(error, null, 2));
-        const errorMessage = typeof error === "object" && error !== null && "message" in error
-          ? (error as { message: string }).message
-          : JSON.stringify(error);
-        return res.status(400).json({ error: errorMessage });
-      }
-
-      res.json({ success: true, provider: "resend", data });
+      throw new Error("No email provider is configured.");
     } catch (err) {
       console.error("Server error:", err);
-      res.status(500).json({ error: "Internal server error" });
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Internal server error",
+      });
     }
   });
 
@@ -354,6 +423,47 @@ async function startServer() {
       console.error("Investor contact error:", error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to verify investor contact.",
+      });
+    }
+  });
+
+  app.post("/api/ai/follow-up", requireAccess, async (req, res) => {
+    try {
+      const subject =
+        typeof req.body?.subject === "string" ? req.body.subject : "";
+      const body = typeof req.body?.body === "string" ? req.body.body : "";
+      const instruction =
+        typeof req.body?.instruction === "string" ? req.body.instruction : "";
+      const investor =
+        req.body?.investor && typeof req.body.investor === "object"
+          ? req.body.investor
+          : null;
+      const rawVault =
+        typeof req.body?.vaultData === "object" && req.body.vaultData !== null
+          ? req.body.vaultData
+          : loadVaultData();
+
+      const result = await generateFollowUpEmail({
+        subject,
+        body,
+        instruction,
+        investor,
+        vaultContext: buildVaultPromptContext(
+          rawVault as ReturnType<typeof loadVaultData>,
+        ),
+      });
+
+      return res.json({
+        provider: "vertex-ai",
+        ...result,
+      });
+    } catch (error) {
+      console.error("Follow-up generation error:", error);
+      return res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to generate follow-up email.",
       });
     }
   });
