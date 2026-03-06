@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Investor } from '../data/investors';
-import { X, Save, Edit2, Trash2, Plus, Tag, Linkedin, ExternalLink } from 'lucide-react';
+import { X, Save, Edit2, Trash2, Plus, Tag, Linkedin, ExternalLink, Sparkles, Search, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from "@google/genai";
 
 interface InvestorDetailModalProps {
   investor: Investor | null;
@@ -9,7 +10,11 @@ interface InvestorDetailModalProps {
   onClose: () => void;
   onSave: (updatedInvestor: Investor) => void;
   onDraftOutreach: (investor: Investor) => void;
+  onToggleInterested?: (investor: Investor) => void;
+  isInterested?: boolean;
 }
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const CONTACT_PREFERENCES = ['Email', 'LinkedIn', 'Twitter / X', 'Warm Intro', 'Other'];
 
@@ -18,11 +23,14 @@ export function InvestorDetailModal({
   isOpen, 
   onClose, 
   onSave,
-  onDraftOutreach 
+  onDraftOutreach,
+  onToggleInterested,
+  isInterested
 }: InvestorDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedInvestor, setEditedInvestor] = useState<Investor | null>(null);
   const [newTag, setNewTag] = useState('');
+  const [isResearching, setIsResearching] = useState(false);
 
   useEffect(() => {
     if (investor) {
@@ -33,6 +41,53 @@ export function InvestorDetailModal({
   }, [investor]);
 
   if (!investor || !editedInvestor) return null;
+
+  const handleResearch = async () => {
+    setIsResearching(true);
+    try {
+      const prompt = `
+        Research the investor "${editedInvestor.name}" at "${editedInvestor.firm}".
+        Find:
+        1. Recent news or public statements from 2024-2025.
+        2. Their latest 3-5 investments.
+        3. A summary of their current investment focus (e.g., specific AI sub-sectors).
+        
+        Return a JSON object with:
+        {
+          "bio_update": "A concise updated bio including recent news",
+          "new_investments": ["Company A", "Company B"],
+          "focus_update": ["Sector A", "Sector B"]
+        }
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json"
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      
+      const updated = {
+        ...editedInvestor,
+        bio: data.bio_update || editedInvestor.bio,
+        notableInvestments: [...new Set([...editedInvestor.notableInvestments, ...(data.new_investments || [])])],
+        focus: [...new Set([...editedInvestor.focus, ...(data.focus_update || [])])]
+      };
+      
+      setEditedInvestor(updated);
+      onSave(updated);
+      alert("Investor profile enriched with real-time data!");
+    } catch (error) {
+      console.error("Research error:", error);
+      alert("Failed to research investor. Please try again.");
+    } finally {
+      setIsResearching(false);
+    }
+  };
 
   const handleSave = () => {
     onSave(editedInvestor);
@@ -85,34 +140,34 @@ export function InvestorDetailModal({
             exit={{ opacity: 0, scale: 0.95 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
-            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl pointer-events-auto flex flex-col">
+            <div className="bg-zinc-950 border border-zinc-800 md:rounded-2xl w-full max-w-3xl h-full md:h-auto md:max-h-[90vh] overflow-y-auto shadow-2xl pointer-events-auto flex flex-col">
               
               {/* Header */}
-              <div className="p-6 border-b border-zinc-800 flex justify-between items-start sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
-                <div className="flex items-center gap-4">
+              <div className="p-4 md:p-6 border-b border-zinc-800 flex justify-between items-start sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
+                <div className="flex items-center gap-3 md:gap-4">
                   <img 
                     src={editedInvestor.imageUrl} 
                     alt={editedInvestor.name} 
-                    className="w-16 h-16 rounded-full object-cover border-2 border-zinc-800"
+                    className="w-12 h-12 md:w-16 md:h-16 rounded-full object-cover border-2 border-zinc-800"
                   />
                   <div>
                     {isEditing ? (
                       <input 
-                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xl font-bold text-white w-full mb-1"
+                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-lg md:text-xl font-bold text-white w-full mb-1"
                         value={editedInvestor.name}
                         onChange={(e) => handleChange('name', e.target.value)}
                       />
                     ) : (
                       <div className="flex items-center gap-2">
-                        <h2 className="text-2xl font-bold text-white">{investor.name}</h2>
-                        {investor.linkedinUrl && (
+                        <h2 className="text-xl md:text-2xl font-bold text-white">{investor?.name}</h2>
+                        {investor?.linkedinUrl && (
                           <a 
                             href={investor.linkedinUrl} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="text-blue-400 hover:text-blue-300 transition-colors"
                           >
-                            <Linkedin size={20} />
+                            <Linkedin size={18} />
                           </a>
                         )}
                       </div>
@@ -130,6 +185,32 @@ export function InvestorDetailModal({
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  {!isEditing && (
+                    <button 
+                      onClick={() => onToggleInterested?.(investor)}
+                      className={`p-2 rounded-lg transition-colors border ${
+                        isInterested ? 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border-zinc-800'
+                      }`}
+                      title={isInterested ? "Remove from interested" : "Mark as interested"}
+                    >
+                      <Star size={18} fill={isInterested ? "currentColor" : "none"} />
+                    </button>
+                  )}
+                  {!isEditing && (
+                    <button 
+                      onClick={handleResearch}
+                      disabled={isResearching}
+                      className="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors flex items-center gap-2 border border-blue-500/20 disabled:opacity-50"
+                      title="Research with Google Search"
+                    >
+                      {isResearching ? (
+                        <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+                      ) : (
+                        <Sparkles size={18} />
+                      )}
+                      <span className="hidden md:inline">Research & Enrich</span>
+                    </button>
+                  )}
                   {isEditing ? (
                     <button 
                       onClick={handleSave}
@@ -155,7 +236,7 @@ export function InvestorDetailModal({
               </div>
 
               {/* Content */}
-              <div className="p-8 space-y-8">
+              <div className="p-4 md:p-8 space-y-6 md:space-y-8">
                 
                 {/* Tags Section */}
                 <section>

@@ -107,7 +107,7 @@ export function NetworkGraph({ investors }: NetworkGraphProps) {
       .selectAll("line")
       .data(data.links)
       .join("line")
-      .attr("stroke-width", (d) => Math.sqrt(d.value));
+      .attr("stroke-width", (d: any) => Math.sqrt(d.value));
 
     const node = svg.append("g")
       .attr("stroke", "#000")
@@ -115,8 +115,8 @@ export function NetworkGraph({ investors }: NetworkGraphProps) {
       .selectAll("circle")
       .data(data.nodes)
       .join("circle")
-      .attr("r", (d) => d.radius)
-      .attr("fill", (d) => {
+      .attr("r", (d: any) => d.radius)
+      .attr("fill", (d: any) => {
         if (d.type === 'investor') return '#3b82f6'; // Blue
         if (d.type === 'focus') return '#a855f7'; // Purple
         return '#10b981'; // Green (Firm)
@@ -124,7 +124,7 @@ export function NetworkGraph({ investors }: NetworkGraphProps) {
       .call(drag(simulation as d3.Simulation<Node, undefined>) as any);
 
     node.append("title")
-      .text((d) => d.name);
+      .text((d: any) => d.name);
 
     // Add labels for larger nodes only to avoid clutter
     const label = svg.append("g")
@@ -133,7 +133,7 @@ export function NetworkGraph({ investors }: NetworkGraphProps) {
       .join("text")
       .attr("dx", 12)
       .attr("dy", ".35em")
-      .text((d) => d.name)
+      .text((d: any) => d.name)
       .attr("fill", "#666")
       .style("font-size", "10px")
       .style("pointer-events", "none");

@@ -1,15 +1,15 @@
 import { Layout, Inbox, Send, File, PenSquare, Users, Database } from 'lucide-react';
 
 interface SidebarProps {
-  activeView: 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault';
-  onNavigate: (view: 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault') => void;
+  activeView: 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose';
+  onNavigate: (view: 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose') => void;
   onCompose: () => void;
   unreadCount: number;
 }
 
 export function Sidebar({ activeView, onNavigate, onCompose, unreadCount }: SidebarProps) {
   return (
-    <div className="w-64 bg-zinc-950 border-r border-zinc-800 h-screen flex flex-col fixed left-0 top-0 z-40">
+    <div className="w-64 bg-zinc-950 border-r border-zinc-800 h-full flex flex-col relative z-40">
       <div className="p-6 flex items-center gap-3">
         <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
           <Layout className="text-white" size={18} />
@@ -20,7 +20,11 @@ export function Sidebar({ activeView, onNavigate, onCompose, unreadCount }: Side
       <div className="px-4 mb-6">
         <button
           onClick={onCompose}
-          className="w-full py-3 bg-white text-zinc-900 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors shadow-lg shadow-white/5"
+          className={`w-full py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all shadow-lg ${
+            activeView === 'compose'
+              ? 'bg-blue-600 text-white shadow-blue-600/20'
+              : 'bg-white text-zinc-900 hover:bg-zinc-200 shadow-white/5'
+          }`}
         >
           <PenSquare size={18} />
           Compose
@@ -28,6 +32,18 @@ export function Sidebar({ activeView, onNavigate, onCompose, unreadCount }: Side
       </div>
 
       <nav className="flex-1 px-2 space-y-1">
+        <button
+          onClick={() => onNavigate('finder')}
+          className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors ${
+            activeView === 'finder'
+              ? 'bg-blue-500/10 text-blue-400'
+              : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+          }`}
+        >
+          <Layout size={18} />
+          Find Investors
+        </button>
+
         <button
           onClick={() => onNavigate('investors')}
           className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors ${
@@ -37,7 +53,7 @@ export function Sidebar({ activeView, onNavigate, onCompose, unreadCount }: Side
           }`}
         >
           <Users size={18} />
-          Find Investors
+          Investors
         </button>
 
         <button
@@ -50,6 +66,18 @@ export function Sidebar({ activeView, onNavigate, onCompose, unreadCount }: Side
         >
           <Database size={18} />
           Novalyte Vault
+        </button>
+
+        <button
+          onClick={() => onNavigate('compose')}
+          className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors ${
+            activeView === 'compose'
+              ? 'bg-blue-500/10 text-blue-400'
+              : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+          }`}
+        >
+          <PenSquare size={18} />
+          Compose
         </button>
 
         <div className="pt-4 pb-2 px-4 text-xs font-semibold text-zinc-600 uppercase tracking-wider">

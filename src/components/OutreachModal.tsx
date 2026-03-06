@@ -16,6 +16,7 @@ export function OutreachModal({ investor, onClose }: OutreachModalProps) {
   const [startupDetails, setStartupDetails] = useState(
     "Novalyte AI is a pre-seed health tech startup focused on AI-driven diagnostics. We have developed a proprietary algorithm that detects early signs of anomalies with 99% accuracy. Our Google Ads campaigns are live and generating significant traffic, validating market interest. However, we are currently out of funds and need capital to sustain operations and scale our user base."
   );
+  const [usps, setUsps] = useState('');
   const [generatedEmail, setGeneratedEmail] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -38,6 +39,9 @@ export function OutreachModal({ investor, onClose }: OutreachModalProps) {
         
         **My Startup Details (Novalyte AI):**
         ${startupDetails}
+
+        **Unique Selling Points:**
+        ${usps}
         
         **Key Context to Include (MANDATORY):**
         - Novalyte AI is ready and the product is live.

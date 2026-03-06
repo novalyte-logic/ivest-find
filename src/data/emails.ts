@@ -8,6 +8,7 @@ export interface Email {
   folder: 'inbox' | 'drafts' | 'sent';
   read: boolean;
   investorId?: string; // Link to an investor if applicable
+  scheduledFor?: string; // ISO string for scheduled send
 }
 
 export const initialEmails: Email[] = [

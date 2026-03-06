@@ -1,31 +1,172 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { InvestorFinder } from './components/InvestorFinder';
 import { EmailList } from './components/EmailList';
-import { ComposeEmailModal } from './components/ComposeEmailModal';
 import { NovalyteVault } from './components/NovalyteVault';
+import { InvestorDetailModal } from './components/InvestorDetailModal';
+import { ComposeView } from './components/ComposeView';
+import { EmailDetail } from './components/EmailDetail';
 import { initialEmails, Email } from './data/emails';
 import { Investor } from './data/investors';
+import { Menu, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault';
+type View = 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose';
 
 export default function App() {
-  const [activeView, setActiveView] = useState<View>('investors');
+  const [activeView, setActiveView] = useState<View>('finder');
   const [emails, setEmails] = useState<Email[]>(initialEmails);
-  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
+  const [interestedInvestors, setInterestedInvestors] = useState<Investor[]>([]);
+  const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+
+  // Load data from localStorage
+  useEffect(() => {
+    const savedInvestors = localStorage.getItem('interested_investors');
+    if (savedInvestors) {
+      try {
+        setInterestedInvestors(JSON.parse(savedInvestors));
+      } catch (e) {
+        console.error("Failed to parse interested investors", e);
+      }
+    }
+
+    const savedEmails = localStorage.getItem('novalyte_emails');
+    if (savedEmails) {
+      try {
+        setEmails(JSON.parse(savedEmails));
+      } catch (e) {
+        console.error("Failed to parse emails", e);
+      }
+    }
+  }, []);
+
+  // Persist data to localStorage
+  useEffect(() => {
+    localStorage.setItem('interested_investors', JSON.stringify(interestedInvestors));
+  }, [interestedInvestors]);
+
+  useEffect(() => {
+    localStorage.setItem('novalyte_emails', JSON.stringify(emails));
+  }, [emails]);
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [composeInitialInvestor, setComposeInitialInvestor] = useState<Investor | null>(null);
   const [composeInitialDraft, setComposeInitialDraft] = useState<string>('');
 
   const handleDraftOutreach = (investor: Investor) => {
     setComposeInitialInvestor(investor);
     setComposeInitialDraft(''); // Clear previous draft
-    setIsComposeOpen(true);
+    setSelectedEmail(null);
+    setActiveView('compose');
   };
 
   const handleCompose = () => {
     setComposeInitialInvestor(null);
     setComposeInitialDraft('');
-    setIsComposeOpen(true);
+    setSelectedEmail(null);
+    setActiveView('compose');
+    setIsSidebarOpen(false);
+  };
+
+  const handleNavigate = (view: View) => {
+    setActiveView(view);
+    setSelectedEmail(null);
+    setIsSidebarOpen(false);
+  };
+
+  const handleToggleInterested = (investor: Investor) => {
+    setInterestedInvestors(prev => {
+      const exists = prev.find(i => i.id === investor.id);
+      if (exists) {
+        setToast({ message: `Removed ${investor.name} from your list`, type: 'info' });
+        return prev.filter(i => i.id !== investor.id);
+      }
+      setToast({ message: `Added ${investor.name} to your list!`, type: 'success' });
+      return [investor, ...prev];
+    });
+  };
+
+  // Auto-hide toast
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const handleSendEmail = async (email: Partial<Email> & { scheduledFor?: string }) => {
+    try {
+      if (!email.scheduledFor) {
+        const response = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            to: email.to,
+            subject: email.subject,
+            body: email.body,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to send email');
+        }
+      }
+
+      const newEmail: Email = {
+        id: `sent-${Date.now()}`,
+        from: 'me@novalyte.ai',
+        to: email.to || '',
+        subject: email.subject || '',
+        body: email.body || '',
+        date: new Date().toISOString(),
+        read: true,
+        folder: 'sent',
+        scheduledFor: email.scheduledFor
+      };
+      
+      setEmails(prev => [newEmail, ...prev]);
+      setToast({ 
+        message: email.scheduledFor 
+          ? `Email scheduled for ${new Date(email.scheduledFor).toLocaleString()}!` 
+          : 'Email sent successfully via Resend!', 
+        type: 'success' 
+      });
+      
+      // Navigate to sent folder to show the user the email was added
+      setActiveView('sent');
+    } catch (error: any) {
+      console.error('Email send error:', error);
+      setToast({ message: `Error: ${error.message}`, type: 'info' });
+    }
+  };
+
+  const handleSelectEmail = (email: Email) => {
+    setSelectedEmail(email);
+    // Mark as read if it's in inbox
+    if (email.folder === 'inbox' && !email.read) {
+      setEmails(prev => prev.map(e => e.id === email.id ? { ...e, read: true } : e));
+    }
+  };
+
+  const handleDeleteEmail = (id: string) => {
+    if (confirm('Are you sure you want to delete this email?')) {
+      setEmails(prev => prev.filter(e => e.id !== id));
+      setSelectedEmail(null);
+      setToast({ message: 'Email deleted', type: 'info' });
+    }
+  };
+
+  const handleReplyEmail = (email: Email) => {
+    setComposeInitialInvestor(null);
+    setComposeInitialDraft(`Subject: Re: ${email.subject}\n\n\n--- Original Message ---\nFrom: ${email.from}\nDate: ${new Date(email.date).toLocaleString()}\n\n${email.body.replace(/<[^>]*>/g, '')}`);
+    setSelectedEmail(null);
+    setActiveView('compose');
   };
 
   const unreadCount = emails.filter(e => e.folder === 'inbox' && !e.read).length;
@@ -33,45 +174,185 @@ export default function App() {
   const filteredEmails = emails.filter(e => e.folder === activeView);
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans flex">
-      <Sidebar 
-        activeView={activeView} 
-        onNavigate={setActiveView} 
-        onCompose={handleCompose}
-        unreadCount={unreadCount}
-      />
+    <div className="min-h-screen bg-black text-white font-sans flex flex-col md:flex-row">
+      {/* Mobile Header */}
+      <div className="md:hidden h-16 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between px-4 sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+            <Menu className="text-white" size={18} />
+          </div>
+          <span className="font-bold text-white text-sm">Outreach Engine</span>
+        </div>
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="p-2 text-zinc-400 hover:text-white"
+        >
+          {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </div>
 
-      <main className="flex-1 ml-64 min-h-screen bg-black relative">
-        {activeView === 'investors' ? (
-          <div className="p-8">
-            <InvestorFinder onDraftOutreach={handleDraftOutreach} />
+      {/* Sidebar - Responsive */}
+      <div className={`fixed inset-0 z-40 md:relative md:z-auto transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className="absolute inset-0 bg-black/50 md:hidden" onClick={() => setIsSidebarOpen(false)} />
+        <Sidebar 
+          activeView={activeView} 
+          onNavigate={handleNavigate} 
+          onCompose={handleCompose}
+          unreadCount={unreadCount}
+        />
+      </div>
+
+      <main className="flex-1 min-h-screen bg-black relative">
+        {activeView === 'finder' ? (
+          <div className="p-4 md:p-8">
+            <InvestorFinder 
+              onDraftOutreach={handleDraftOutreach} 
+              onToggleInterested={handleToggleInterested}
+              interestedIds={new Set(interestedInvestors.map(i => i.id))}
+            />
+          </div>
+        ) : activeView === 'investors' ? (
+          <div className="p-4 md:p-8">
+            <div className="max-w-7xl mx-auto">
+              <div className="mb-8">
+                <h2 className="text-3xl font-bold text-white mb-2">My Investors</h2>
+                <p className="text-zinc-400">Track and manage the investors you're interested in.</p>
+              </div>
+              
+              {interestedInvestors.length === 0 ? (
+                <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-3xl p-12 text-center">
+                  <p className="text-zinc-500 mb-4">You haven't added any investors yet.</p>
+                  <button 
+                    onClick={() => setActiveView('finder')}
+                    className="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-50 transition-colors"
+                  >
+                    Find Investors
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {interestedInvestors.map(investor => (
+                    <div 
+                      key={investor.id} 
+                      onClick={() => setSelectedInvestor(investor)}
+                      className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 hover:border-zinc-700 transition-all group cursor-pointer"
+                    >
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-4">
+                          <img 
+                            src={investor.imageUrl} 
+                            alt={investor.name}
+                            className="w-12 h-12 rounded-full object-cover border-2 border-zinc-800"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div>
+                            <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors">{investor.name}</h3>
+                            <p className="text-xs text-zinc-500">{investor.firm}</p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleInterested(investor);
+                          }}
+                          className="text-blue-500 hover:text-blue-400 text-xs font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {investor.focus.slice(0, 2).map(f => (
+                          <span key={f} className="px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded text-[10px] uppercase font-bold tracking-wider">
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDraftOutreach(investor);
+                        }}
+                        className="w-full py-2 bg-zinc-800 text-white text-sm font-bold rounded-xl hover:bg-zinc-700 transition-colors"
+                      >
+                        Draft Outreach
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal for My Investors view */}
+            <InvestorDetailModal
+              investor={selectedInvestor}
+              isOpen={!!selectedInvestor}
+              onClose={() => setSelectedInvestor(null)}
+              onSave={(updated) => {
+                setInterestedInvestors(prev => prev.map(i => i.id === updated.id ? updated : i));
+                setSelectedInvestor(updated);
+              }}
+              onDraftOutreach={(inv) => {
+                setSelectedInvestor(null);
+                handleDraftOutreach(inv);
+              }}
+              onToggleInterested={handleToggleInterested}
+              isInterested={selectedInvestor ? interestedInvestors.some(i => i.id === selectedInvestor.id) : false}
+            />
           </div>
         ) : activeView === 'vault' ? (
-          <div className="p-8">
+          <div className="p-4 md:p-8">
             <NovalyteVault />
           </div>
+        ) : activeView === 'compose' ? (
+          <ComposeView 
+            onSend={handleSendEmail}
+            initialInvestor={composeInitialInvestor}
+            initialDraft={composeInitialDraft}
+            interestedInvestors={interestedInvestors}
+          />
         ) : (
-          <div className="h-screen flex flex-col">
-            <div className="h-16 border-b border-zinc-800 flex items-center px-6 bg-zinc-950/50 backdrop-blur">
-              <h2 className="text-xl font-bold capitalize text-white">{activeView}</h2>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <EmailList 
-                emails={filteredEmails} 
-                folder={activeView as 'inbox' | 'drafts' | 'sent'}
-                onSelectEmail={(email) => console.log('Selected email:', email)}
+          <div className="h-[calc(100vh-64px)] md:h-screen flex flex-col">
+            {selectedEmail ? (
+              <EmailDetail 
+                email={selectedEmail}
+                onBack={() => setSelectedEmail(null)}
+                onDelete={handleDeleteEmail}
+                onReply={handleReplyEmail}
               />
-            </div>
+            ) : (
+              <>
+                <div className="h-14 md:h-16 border-b border-zinc-800 flex items-center px-4 md:px-6 bg-zinc-950/50 backdrop-blur">
+                  <h2 className="text-lg md:text-xl font-bold capitalize text-white">{activeView}</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <EmailList 
+                    emails={filteredEmails} 
+                    folder={activeView as 'inbox' | 'drafts' | 'sent'}
+                    onSelectEmail={handleSelectEmail}
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>
 
-      <ComposeEmailModal 
-        isOpen={isComposeOpen} 
-        onClose={() => setIsComposeOpen(false)}
-        initialInvestor={composeInitialInvestor}
-        initialDraft={composeInitialDraft}
-      />
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 20, x: '-50%' }}
+            className={`fixed bottom-8 left-1/2 z-[100] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border ${
+              toast.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+            }`}
+          >
+            <div className={`w-2 h-2 rounded-full animate-pulse ${toast.type === 'success' ? 'bg-green-500' : 'bg-blue-500'}`} />
+            <span className="text-sm font-medium">{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

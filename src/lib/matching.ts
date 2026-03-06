@@ -1,4 +1,5 @@
 import { Investor } from '../data/investors';
+import { fuzzyMatch } from './utils';
 
 export interface MatchResult {
   investorId: string;
@@ -48,6 +49,28 @@ export function calculateMatchScore(investor: Investor): MatchResult {
   if (investor.investmentRange.includes('$25k') || investor.investmentRange.includes('$50k')) {
     score += 10;
     rationale.push('Investment range fits pre-seed');
+  }
+
+  // Check Notable Investments (Fuzzy Match)
+  const notableMatches = investor.notableInvestments.filter(inv => 
+    keywords.high.some(k => fuzzyMatch(inv, k)) || 
+    keywords.medium.some(k => fuzzyMatch(inv, k))
+  );
+  if (notableMatches.length > 0) {
+    score += 15;
+    rationale.push(`Has relevant portfolio companies: ${notableMatches.join(', ')}`);
+  }
+
+  // Check Tags
+  if (investor.tags && investor.tags.length > 0) {
+    if (investor.tags.some(t => t.toLowerCase().includes('warm intro'))) {
+      score += 20;
+      rationale.push('Warm intro available');
+    }
+    if (investor.tags.some(t => t.toLowerCase().includes('met'))) {
+      score += 15;
+      rationale.push('Previously met');
+    }
   }
 
   // Cap score at 100

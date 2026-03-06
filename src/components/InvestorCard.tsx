@@ -1,5 +1,6 @@
+import { MouseEvent } from 'react';
 import { Investor } from '../data/investors';
-import { MapPin, DollarSign, ArrowRight, Sparkles, Clock } from 'lucide-react';
+import { MapPin, DollarSign, ArrowRight, Sparkles, Clock, Star } from 'lucide-react';
 import { motion } from 'motion/react';
 import { calculateMatchScore } from '../lib/matching';
 
@@ -7,12 +8,19 @@ interface InvestorCardProps {
   investor: Investor;
   onSelect: (investor: Investor) => void;
   onAddTag: (investor: Investor, tag: string) => void;
+  onToggleInterested?: (investor: Investor) => void;
+  isInterested?: boolean;
 }
 
-export function InvestorCard({ investor, onSelect, onAddTag }: InvestorCardProps) {
+export function InvestorCard({ investor, onSelect, onAddTag, onToggleInterested, isInterested }: InvestorCardProps) {
   const match = calculateMatchScore(investor);
 
-  const handleFollowUp = (e: React.MouseEvent) => {
+  const handleToggleInterested = (e: MouseEvent) => {
+    e.stopPropagation();
+    onToggleInterested?.(investor);
+  };
+
+  const handleFollowUp = (e: MouseEvent) => {
     e.stopPropagation();
     const tag = window.prompt("Enter tag for follow up (e.g., 'Follow Up Scheduled', 'Next Contact Date'):", "Follow Up Scheduled");
     if (tag) {
@@ -45,13 +53,24 @@ export function InvestorCard({ investor, onSelect, onAddTag }: InvestorCardProps
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-           <div className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${
-             match.score >= 80 ? 'bg-green-500/20 text-green-400' : 
-             match.score >= 50 ? 'bg-yellow-500/20 text-yellow-400' : 
-             'bg-zinc-800 text-zinc-400'
-           }`}>
-             <Sparkles size={10} />
-             {match.score}% Match
+           <div className="flex items-center gap-2">
+             <button 
+               onClick={handleToggleInterested}
+               className={`p-1.5 rounded-lg transition-colors ${
+                 isInterested ? 'text-yellow-500 bg-yellow-500/10' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+               }`}
+               title={isInterested ? "Remove from interested" : "Mark as interested"}
+             >
+               <Star size={16} fill={isInterested ? "currentColor" : "none"} />
+             </button>
+             <div className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${
+               match.score >= 80 ? 'bg-green-500/20 text-green-400' : 
+               match.score >= 50 ? 'bg-yellow-500/20 text-yellow-400' : 
+               'bg-zinc-800 text-zinc-400'
+             }`}>
+               <Sparkles size={10} />
+               {match.score}% Match
+             </div>
            </div>
            <div className="px-2 py-1 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 uppercase tracking-wider">
              {investor.stage}
