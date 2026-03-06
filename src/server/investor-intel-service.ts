@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { Investor } from '../data/investors';
+import { dedupeInvestors } from '../lib/investor-identity';
 import {
   ContactProvider,
   InvestorContactResponse,
@@ -221,6 +222,27 @@ function requireConfiguredProvider<T extends string>(
     throw new Error(`${provider.label} is not configured on the server.`);
   }
   return provider;
+}
+
+function getConfiguredSearchFallbackProviders(primary: SearchProvider): SearchProvider[] {
+  const preferredOrder: SearchProvider[] = [
+    primary,
+    'exa',
+    'google-grounded',
+    'firecrawl',
+    'explorium',
+    'ocean',
+  ];
+  const available = getSearchProviderOptions()
+    .filter((provider) => provider.implemented && provider.configured)
+    .map((provider) => provider.id);
+
+  return preferredOrder.filter(
+    (provider, index) =>
+      provider !== primary &&
+      available.includes(provider) &&
+      preferredOrder.indexOf(provider) === index,
+  );
 }
 
 async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {
@@ -941,7 +963,7 @@ function extractGroundingSources(response: unknown): SearchResultSource[] {
   );
 }
 
-export async function searchInvestorsWithProvider(input: {
+async function runInvestorSearch(input: {
   query: string;
   searchProvider: SearchProvider;
   vaultContext: string;
@@ -967,6 +989,56 @@ export async function searchInvestorsWithProvider(input: {
     documents,
     limit,
   );
+}
+
+export async function searchInvestorsWithProvider(input: {
+  query: string;
+  searchProvider: SearchProvider;
+  vaultContext: string;
+  limit?: number;
+}): Promise<InvestorSearchResponse> {
+  const limit = Math.max(1, Math.min(input.limit || 8, 12));
+  const primary = await runInvestorSearch({
+    ...input,
+    limit,
+  });
+
+  let investors = dedupeInvestors(primary.investors).slice(0, limit);
+  let sources = dedupeSources(primary.sources);
+
+  if (investors.length >= limit) {
+    return {
+      provider: primary.provider,
+      investors,
+      sources,
+    };
+  }
+
+  for (const fallbackProvider of getConfiguredSearchFallbackProviders(input.searchProvider)) {
+    const remaining = limit - investors.length;
+    if (remaining <= 0) {
+      break;
+    }
+
+    try {
+      const fallback = await runInvestorSearch({
+        ...input,
+        searchProvider: fallbackProvider,
+        limit: remaining,
+      });
+
+      investors = dedupeInvestors([...investors, ...fallback.investors]).slice(0, limit);
+      sources = dedupeSources([...sources, ...fallback.sources]);
+    } catch (error) {
+      console.error(`Fallback investor search failed for provider ${fallbackProvider}:`, error);
+    }
+  }
+
+  return {
+    provider: primary.provider,
+    investors,
+    sources,
+  };
 }
 
 export async function enrichInvestorResearch(input: {
