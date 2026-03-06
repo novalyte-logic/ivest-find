@@ -27,16 +27,28 @@ function getResearchModel() {
   return process.env.INVESTOR_RESEARCH_MODEL || getSearchModel();
 }
 
+function getEnvAny(...keys: string[]) {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '';
+}
+
 function getGoogleApiKey(): string {
-  const apiKey =
-    process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    process.env.VITE_VERTEX_AI_API_KEY ||
-    '';
+  const apiKey = getEnvAny(
+    'VERTEX_AI_API_KEY',
+    'VITE_VERTEX_AI_API_KEY',
+    'GOOGLE_API_KEY',
+    'GEMINI_API_KEY',
+    'VITE_GEMINI_API_KEY',
+  );
 
   if (!apiKey) {
-    throw new Error('GOOGLE_API_KEY or GEMINI_API_KEY is not configured on the server.');
+    throw new Error('No Google or Vertex AI API key is configured on the server.');
   }
 
   return apiKey;
@@ -55,16 +67,24 @@ function getSearchProviderOptions(): ProviderOption<SearchProvider>[] {
   return [
     {
       id: 'google-grounded',
-      label: 'Google Grounded',
-      description: 'Gemini with Google Search grounding for live investor discovery.',
-      configured: Boolean(getSafeEnv('GOOGLE_API_KEY') || getSafeEnv('GEMINI_API_KEY') || getSafeEnv('VITE_GEMINI_API_KEY')),
+      label: 'Vertex Grounded',
+      description: 'Vertex/Gemini with Google Search grounding for live investor discovery.',
+      configured: Boolean(
+        getEnvAny(
+          'VERTEX_AI_API_KEY',
+          'VITE_VERTEX_AI_API_KEY',
+          'GOOGLE_API_KEY',
+          'GEMINI_API_KEY',
+          'VITE_GEMINI_API_KEY',
+        ),
+      ),
       implemented: true,
     },
     {
       id: 'exa',
       label: 'Exa',
       description: 'Live web search with strong people and company discovery coverage.',
-      configured: Boolean(getSafeEnv('EXA_API_KEY')),
+      configured: Boolean(getEnvAny('EXA_API_KEY', 'VITE_EXA_API_KEY')),
       implemented: true,
     },
     {
@@ -72,6 +92,13 @@ function getSearchProviderOptions(): ProviderOption<SearchProvider>[] {
       label: 'Firecrawl',
       description: 'Web search with scraped page content for grounded synthesis.',
       configured: Boolean(getSafeEnv('FIRECRAWL_API_KEY')),
+      implemented: true,
+    },
+    {
+      id: 'explorium',
+      label: 'Explorium',
+      description: 'Prospect data search for investor and fund decision-maker discovery.',
+      configured: Boolean(getEnvAny('EXPLORIUM_API_KEY', 'VITE_EXPLORIUM_API_KEY')),
       implemented: true,
     },
   ];
@@ -88,16 +115,24 @@ function getContactProviderOptions(): ProviderOption<ContactProvider>[] {
     },
     {
       id: 'google-grounded',
-      label: 'Google Grounded',
-      description: 'Use Google Search grounding to find explicit public investor contact data.',
-      configured: Boolean(getSafeEnv('GOOGLE_API_KEY') || getSafeEnv('GEMINI_API_KEY') || getSafeEnv('VITE_GEMINI_API_KEY')),
+      label: 'Vertex Grounded',
+      description: 'Use Vertex/Gemini grounding to find explicit public investor contact data.',
+      configured: Boolean(
+        getEnvAny(
+          'VERTEX_AI_API_KEY',
+          'VITE_VERTEX_AI_API_KEY',
+          'GOOGLE_API_KEY',
+          'GEMINI_API_KEY',
+          'VITE_GEMINI_API_KEY',
+        ),
+      ),
       implemented: true,
     },
     {
       id: 'exa',
       label: 'Exa',
       description: 'Use Exa web search to find explicit public investor contact data.',
-      configured: Boolean(getSafeEnv('EXA_API_KEY')),
+      configured: Boolean(getEnvAny('EXA_API_KEY', 'VITE_EXA_API_KEY')),
       implemented: true,
     },
     {
@@ -124,9 +159,9 @@ function getContactProviderOptions(): ProviderOption<ContactProvider>[] {
     {
       id: 'explorium',
       label: 'Explorium',
-      description: 'Reserved for Explorium enrichment when the driver is enabled.',
-      configured: Boolean(getSafeEnv('EXPLORIUM_API_KEY')),
-      implemented: false,
+      description: 'Use Explorium prospect data to find public identity and company routes.',
+      configured: Boolean(getEnvAny('EXPLORIUM_API_KEY', 'VITE_EXPLORIUM_API_KEY')),
+      implemented: true,
     },
   ];
 }
@@ -356,7 +391,7 @@ function mergeContactResult(
 
 async function searchWithExa(query: string, limit: number): Promise<SearchDocument[]> {
   requireConfiguredProvider(getSearchProviderOptions(), 'exa');
-  const apiKey = getSafeEnv('EXA_API_KEY');
+  const apiKey = getEnvAny('EXA_API_KEY', 'VITE_EXA_API_KEY');
 
   const response = await fetchJson<{ results?: Array<Record<string, unknown>> }>(
     'https://api.exa.ai/search',
@@ -389,6 +424,112 @@ async function searchWithExa(query: string, limit: number): Promise<SearchDocume
       stringValue(result.summary) ||
       stringValue(result.highlights),
   }));
+}
+
+function buildExploriumSearchPayload(query: string, limit: number) {
+  const normalizedQuery = query.toLowerCase();
+  const wantsUsOnly =
+    normalizedQuery.includes(' us ') ||
+    normalizedQuery.startsWith('us ') ||
+    normalizedQuery.includes(' united states') ||
+    normalizedQuery.includes('north america');
+
+  const wantsUkOnly =
+    normalizedQuery.includes(' uk ') ||
+    normalizedQuery.includes(' united kingdom') ||
+    normalizedQuery.includes(' london');
+
+  const countryCodes = wantsUkOnly ? ['gb'] : wantsUsOnly ? ['us'] : ['us', 'ca', 'gb'];
+
+  return {
+    mode: 'full',
+    size: Math.max(limit * 4, 12),
+    page_size: Math.max(limit * 4, 12),
+    page: 1,
+    filters: {
+      job_title: {
+        values: [
+          'partner',
+          'principal',
+          'investor',
+          'managing partner',
+          'general partner',
+          'venture partner',
+          'founding partner',
+        ],
+      },
+      country_code: {
+        values: countryCodes,
+      },
+    },
+  };
+}
+
+async function searchWithExplorium(
+  query: string,
+  limit: number,
+): Promise<SearchDocument[]> {
+  requireConfiguredProvider(getSearchProviderOptions(), 'explorium');
+  const apiKey = getEnvAny('EXPLORIUM_API_KEY', 'VITE_EXPLORIUM_API_KEY');
+
+  const response = await fetchJson<{ data?: Array<Record<string, unknown>> }>(
+    'https://api.explorium.ai/v1/prospects',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        api_key: apiKey,
+      },
+      body: JSON.stringify(buildExploriumSearchPayload(query, limit)),
+    },
+  );
+
+  return (response.data || []).map((result) => {
+    const fullName =
+      stringValue(result.full_name) ||
+      [stringValue(result.first_name), stringValue(result.last_name)]
+        .filter(Boolean)
+        .join(' ');
+    const companyName = stringValue(result.company_name);
+    const linkedinUrl =
+      optionalStringValue(result.linkedin) ||
+      optionalStringValue(
+        Array.isArray(result.linkedin_url_array)
+          ? (result.linkedin_url_array as unknown[]).find((value) => optionalStringValue(value))
+          : '',
+      );
+    const experience = Array.isArray(result.experience)
+      ? (result.experience as unknown[])
+          .map((value) => optionalStringValue(value))
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
+    const skills = Array.isArray(result.skills)
+      ? (result.skills as unknown[])
+          .map((value) => optionalStringValue(value))
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+
+    return {
+      title: [fullName, companyName ? `at ${companyName}` : ''].filter(Boolean).join(' '),
+      url:
+        linkedinUrl ||
+        optionalStringValue(result.company_website) ||
+        '',
+      text: [
+        `Name: ${fullName}`,
+        `Company: ${companyName || 'Unknown'}`,
+        `Title: ${stringValue(result.job_title) || 'Unknown'}`,
+        `Location: ${[stringValue(result.city), stringValue(result.region_name), stringValue(result.country_name)]
+          .filter(Boolean)
+          .join(', ') || 'Unknown'}`,
+        `Experience: ${experience.join('; ') || 'Not available'}`,
+        `Skills: ${skills.join(', ') || 'Not available'}`,
+        `Company website: ${optionalStringValue(result.company_website) || 'Unknown'}`,
+      ].join('\n'),
+    } satisfies SearchDocument;
+  });
 }
 
 async function searchWithFirecrawl(query: string, limit: number): Promise<SearchDocument[]> {
@@ -430,6 +571,10 @@ async function searchDocumentsWithProvider(
 ): Promise<SearchDocument[]> {
   if (provider === 'exa') {
     return searchWithExa(query, limit);
+  }
+
+  if (provider === 'explorium') {
+    return searchWithExplorium(query, limit);
   }
 
   return searchWithFirecrawl(query, limit);
@@ -697,9 +842,11 @@ export async function searchInvestorsWithProvider(input: {
   }
 
   const documents =
-    input.searchProvider === 'exa'
-      ? await searchWithExa(input.query, limit)
-      : await searchWithFirecrawl(input.query, limit);
+    await searchDocumentsWithProvider(
+      input.query,
+      input.searchProvider,
+      limit,
+    );
 
   return synthesizeInvestorsFromDocuments(
     input.query,
@@ -1020,7 +1167,8 @@ export async function verifyInvestorContact(input: {
   if (
     input.contactProvider === 'google-grounded' ||
     input.contactProvider === 'exa' ||
-    input.contactProvider === 'firecrawl'
+    input.contactProvider === 'firecrawl' ||
+    input.contactProvider === 'explorium'
   ) {
     return {
       provider: input.contactProvider,

@@ -1,6 +1,10 @@
 import { Investor } from '../data/investors';
 
-export type SearchProvider = 'google-grounded' | 'exa' | 'firecrawl';
+export type SearchProvider =
+  | 'google-grounded'
+  | 'exa'
+  | 'firecrawl'
+  | 'explorium';
 export type ContactProvider =
   | 'none'
   | 'google-grounded'
@@ -96,7 +100,12 @@ export function saveProviderPreferences(preferences: ProviderPreferences) {
 }
 
 export function isSearchProvider(value: unknown): value is SearchProvider {
-  return value === 'google-grounded' || value === 'exa' || value === 'firecrawl';
+  return (
+    value === 'google-grounded' ||
+    value === 'exa' ||
+    value === 'firecrawl' ||
+    value === 'explorium'
+  );
 }
 
 export function isContactProvider(value: unknown): value is ContactProvider {

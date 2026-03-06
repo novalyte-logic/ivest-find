@@ -13,6 +13,18 @@ services:
         sync: false
       - key: VITE_VERTEX_AI_API_KEY
         sync: false
+      - key: VERTEX_AI_API_KEY
+        sync: false
+      - key: EXA_API_KEY
+        sync: false
+      - key: VITE_EXA_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: EXPLORIUM_API_KEY
+        sync: false
+      - key: VITE_EXPLORIUM_API_KEY
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL

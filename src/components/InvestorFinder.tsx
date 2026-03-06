@@ -662,7 +662,7 @@ export function InvestorFinder({
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed inset-4 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[800px] md:h-[600px] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl z-[70] flex flex-col overflow-hidden"
+              className="fixed inset-4 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:h-[78vh] md:max-h-[860px] md:w-[920px] bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl z-[70] flex flex-col overflow-hidden"
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
                 <div className="flex items-center gap-3">
@@ -745,7 +745,7 @@ export function InvestorFinder({
               </div>
 
               {suggestedSearchQueries.length > 0 && (
-                <div className="px-6 pb-4 flex flex-wrap gap-2">
+                <div className="max-h-28 overflow-y-auto px-6 pb-4 flex flex-wrap gap-2">
                   {suggestedSearchQueries.slice(0, 6).map((query) => (
                     <button
                       key={query}
@@ -758,7 +758,7 @@ export function InvestorFinder({
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="min-h-0 flex-1 overflow-y-auto p-6">
                 {isWebSearching ? (
                   <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
                     <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
