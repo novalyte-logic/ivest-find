@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { InvestorFinder } from './components/InvestorFinder';
 import { EmailList } from './components/EmailList';
@@ -13,6 +13,7 @@ import { InvestorAvatar } from './components/InvestorAvatar';
 import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseJsonResponse } from './lib/http';
+import { dedupeInvestors, getInvestorIdentityKey } from './lib/investor-identity';
 
 type View = 'finder' | 'investors' | 'inbox' | 'drafts' | 'sent' | 'vault' | 'compose';
 
@@ -73,7 +74,9 @@ export default function App() {
     if (savedInvestors) {
       try {
         const parsed = JSON.parse(savedInvestors) as Investor[];
-        const cleaned = parsed.filter((investor) => !isLegacyMockInvestor(investor));
+        const cleaned = dedupeInvestors(
+          parsed.filter((investor) => !isLegacyMockInvestor(investor)),
+        );
         setInterestedInvestors(cleaned);
         if (cleaned.length !== parsed.length) {
           localStorage.setItem('interested_investors', JSON.stringify(cleaned));
@@ -99,7 +102,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('interested_investors', JSON.stringify(interestedInvestors));
+    localStorage.setItem(
+      'interested_investors',
+      JSON.stringify(dedupeInvestors(interestedInvestors)),
+    );
   }, [interestedInvestors]);
 
   useEffect(() => {
@@ -152,15 +158,61 @@ export default function App() {
 
   const handleToggleInterested = (investor: Investor) => {
     setInterestedInvestors(prev => {
-      const exists = prev.find(i => i.id === investor.id);
+      const targetKey = getInvestorIdentityKey(investor);
+      const exists = prev.find((item) => getInvestorIdentityKey(item) === targetKey);
       if (exists) {
         setToast({ message: `Removed ${investor.name} from your list`, type: 'info' });
-        return prev.filter(i => i.id !== investor.id);
+        return prev.filter((item) => getInvestorIdentityKey(item) !== targetKey);
       }
       setToast({ message: `Added ${investor.name} to your list!`, type: 'success' });
-      return [investor, ...prev];
+      return dedupeInvestors([investor, ...prev]);
     });
   };
+
+  const handleImportInvestors = (incomingInvestors: Investor[]) => {
+    const validInvestors = incomingInvestors.filter(
+      (investor) => !isLegacyMockInvestor(investor),
+    );
+
+    if (validInvestors.length === 0) {
+      return 0;
+    }
+
+    let addedCount = 0;
+
+    setInterestedInvestors((current) => {
+      const existingKeys = new Set(current.map((investor) => getInvestorIdentityKey(investor)));
+      const newInvestors = validInvestors.filter((investor) => {
+        const key = getInvestorIdentityKey(investor);
+        return !existingKeys.has(key);
+      });
+
+      addedCount = newInvestors.length;
+
+      if (newInvestors.length === 0) {
+        return current;
+      }
+
+      return dedupeInvestors([...newInvestors, ...current]);
+    });
+
+    setToast({
+      message:
+        addedCount === 0
+          ? 'Those investors are already in My Investors.'
+          : addedCount === 1
+            ? `Added ${validInvestors[0].name} to My Investors.`
+            : `Added ${addedCount} investors to My Investors.`,
+      type: addedCount === 0 ? 'info' : 'success',
+    });
+
+    return addedCount;
+  };
+
+  const interestedKeys = useMemo(
+    () => new Set(interestedInvestors.map((investor) => getInvestorIdentityKey(investor))),
+    [interestedInvestors],
+  );
 
   // Auto-hide toast
   useEffect(() => {
@@ -287,7 +339,8 @@ export default function App() {
             <InvestorFinder 
               onDraftOutreach={handleDraftOutreach} 
               onToggleInterested={handleToggleInterested}
-              interestedIds={new Set(interestedInvestors.map(i => i.id))}
+              onImportInvestors={handleImportInvestors}
+              interestedKeys={interestedKeys}
             />
           </div>
         ) : activeView === 'investors' ? (
@@ -374,7 +427,11 @@ export default function App() {
                 handleDraftOutreach(inv);
               }}
               onToggleInterested={handleToggleInterested}
-              isInterested={selectedInvestor ? interestedInvestors.some(i => i.id === selectedInvestor.id) : false}
+              isInterested={
+                selectedInvestor
+                  ? interestedKeys.has(getInvestorIdentityKey(selectedInvestor))
+                  : false
+              }
             />
           </div>
         ) : activeView === 'vault' ? (

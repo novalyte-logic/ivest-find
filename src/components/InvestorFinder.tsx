@@ -30,34 +30,24 @@ import {
   ProviderPreferences,
   saveProviderPreferences,
 } from '../lib/investor-intel';
+import { dedupeInvestors, getInvestorIdentityKey } from '../lib/investor-identity';
 
 type SortOption = 'match' | 'rangeAsc' | 'rangeDesc' | 'expertiseMatch';
 const INVESTOR_STORAGE_KEY = 'novalyte_live_investors';
 
-function dedupeInvestors(investors: Investor[]): Investor[] {
-  const seen = new Set<string>();
-
-  return investors.filter((investor) => {
-    const key =
-      investor.linkedinUrl?.trim().toLowerCase() ||
-      `${investor.name.trim().toLowerCase()}::${(investor.firm || '').trim().toLowerCase()}::${investor.location.trim().toLowerCase()}`;
-
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
 interface InvestorFinderProps {
   onDraftOutreach: (investor: Investor) => void;
   onToggleInterested: (investor: Investor) => void;
-  interestedIds: Set<string>;
+  onImportInvestors: (investors: Investor[]) => number;
+  interestedKeys: Set<string>;
 }
 
-export function InvestorFinder({ onDraftOutreach, onToggleInterested, interestedIds }: InvestorFinderProps) {
+export function InvestorFinder({
+  onDraftOutreach,
+  onToggleInterested,
+  onImportInvestors,
+  interestedKeys,
+}: InvestorFinderProps) {
   const [investors, setInvestors] = useState<Investor[]>(() => {
     if (typeof window === 'undefined') {
       return initialInvestors;
@@ -89,6 +79,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
   const [showWebSearchModal, setShowWebSearchModal] = useState(false);
   const [webSearchQuery, setWebSearchQuery] = useState('');
   const [importingIds, setImportingIds] = useState<Set<string>>(new Set());
+  const [selectedWebResultIds, setSelectedWebResultIds] = useState<Set<string>>(new Set());
   const [contactLookupIds, setContactLookupIds] = useState<Set<string>>(new Set());
   const [providerStatus, setProviderStatus] = useState<InvestorIntelProviderStatus | null>(null);
   const [providerPreferences, setProviderPreferences] = useState<ProviderPreferences>(() => loadProviderPreferences());
@@ -141,6 +132,13 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
   useEffect(() => {
     saveProviderPreferences(providerPreferences);
   }, [providerPreferences]);
+
+  useEffect(() => {
+    setSelectedWebResultIds((current) => {
+      const validIds = new Set(webSearchResults.map((investor) => investor.id));
+      return new Set(Array.from(current).filter((id) => validIds.has(id)));
+    });
+  }, [webSearchResults]);
 
   useEffect(() => {
     const cleaned = dedupeInvestors(
@@ -274,6 +272,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
       });
       const result = await parseJsonResponse<InvestorSearchResponse>(response);
       setWebSearchResults(result.investors);
+      setSelectedWebResultIds(new Set());
     } catch (error) {
       console.error("Web search error:", error);
       alert(error instanceof Error ? error.message : 'Failed to search investors.');
@@ -322,10 +321,63 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
     setImportingIds(prev => new Set(prev).add(investor.id));
     setTimeout(() => {
       setInvestors(prev => dedupeInvestors([investor, ...prev]));
+      onImportInvestors([investor]);
       setWebSearchResults(prev => prev.filter(i => i.id !== investor.id));
+      setSelectedWebResultIds((current) => {
+        const next = new Set(current);
+        next.delete(investor.id);
+        return next;
+      });
       setImportingIds(prev => {
         const next = new Set(prev);
         next.delete(investor.id);
+        return next;
+      });
+    }, 600);
+  };
+
+  const handleToggleWebResultSelection = (investorId: string) => {
+    setSelectedWebResultIds((current) => {
+      const next = new Set(current);
+      if (next.has(investorId)) {
+        next.delete(investorId);
+      } else {
+        next.add(investorId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllWebResults = () => {
+    setSelectedWebResultIds(new Set(webSearchResults.map((investor) => investor.id)));
+  };
+
+  const handleClearWebResultSelection = () => {
+    setSelectedWebResultIds(new Set());
+  };
+
+  const handleImportSelectedInvestors = () => {
+    const selectedInvestors = webSearchResults.filter((investor) =>
+      selectedWebResultIds.has(investor.id),
+    );
+
+    if (selectedInvestors.length === 0) {
+      return;
+    }
+
+    const selectedIdSet = new Set(selectedInvestors.map((investor) => investor.id));
+    setImportingIds((current) => new Set([...current, ...selectedIdSet]));
+
+    setTimeout(() => {
+      setInvestors((current) => dedupeInvestors([...selectedInvestors, ...current]));
+      onImportInvestors(selectedInvestors);
+      setWebSearchResults((current) =>
+        current.filter((investor) => !selectedIdSet.has(investor.id)),
+      );
+      setSelectedWebResultIds(new Set());
+      setImportingIds((current) => {
+        const next = new Set(current);
+        selectedIdSet.forEach((id) => next.delete(id));
         return next;
       });
     }, 600);
@@ -560,7 +612,7 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
               onSelect={setSelectedInvestor} 
               onAddTag={handleAddTag}
               onToggleInterested={onToggleInterested}
-              isInterested={interestedIds.has(investor.id)}
+              isInterested={interestedKeys.has(getInvestorIdentityKey(investor))}
               vaultData={vaultData}
             />
           </div>
@@ -588,7 +640,11 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
           onDraftOutreach(inv);
         }}
         onToggleInterested={onToggleInterested}
-        isInterested={selectedInvestor ? interestedIds.has(selectedInvestor.id) : false}
+        isInterested={
+          selectedInvestor
+            ? interestedKeys.has(getInvestorIdentityKey(selectedInvestor))
+            : false
+        }
       />
 
       {/* Web Search Modal */}
@@ -713,9 +769,65 @@ export function InvestorFinder({ onDraftOutreach, onToggleInterested, interested
                   </div>
                 ) : webSearchResults.length > 0 ? (
                   <div className="grid grid-cols-1 gap-4">
+                    <div className="flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-white">
+                          {webSearchResults.length} investor{webSearchResults.length === 1 ? '' : 's'} found
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Select individual investors or import the full search batch into My Investors.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={handleSelectAllWebResults}
+                          disabled={webSearchResults.length === 0}
+                          className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:opacity-40"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          onClick={handleClearWebResultSelection}
+                          disabled={selectedWebResultIds.size === 0}
+                          className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:opacity-40"
+                        >
+                          Clear
+                        </button>
+                        <button
+                          onClick={handleImportSelectedInvestors}
+                          disabled={selectedWebResultIds.size === 0}
+                          className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-300 transition-colors hover:bg-blue-500/20 disabled:opacity-40"
+                        >
+                          Import Selected ({selectedWebResultIds.size})
+                        </button>
+                      </div>
+                    </div>
                     {webSearchResults.map((inv) => (
-                      <div key={inv.id} className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl flex items-start justify-between group">
+                      <div
+                        key={inv.id}
+                        className={`p-4 rounded-xl flex items-start justify-between group transition-colors ${
+                          selectedWebResultIds.has(inv.id)
+                            ? 'bg-blue-500/10 border border-blue-500/30'
+                            : 'bg-zinc-900 border border-zinc-800'
+                        }`}
+                      >
                         <div className="flex gap-4">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleWebResultSelection(inv.id)}
+                            className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                              selectedWebResultIds.has(inv.id)
+                                ? 'border-blue-500 bg-blue-500 text-white'
+                                : 'border-zinc-700 bg-zinc-950 text-transparent hover:border-zinc-500'
+                            }`}
+                            aria-label={
+                              selectedWebResultIds.has(inv.id)
+                                ? `Unselect ${inv.name}`
+                                : `Select ${inv.name}`
+                            }
+                          >
+                            <CheckCircle2 size={12} />
+                          </button>
                           <InvestorAvatar
                             imageUrl={inv.imageUrl}
                             name={inv.name}
