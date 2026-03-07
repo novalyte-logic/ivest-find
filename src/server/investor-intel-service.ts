@@ -294,6 +294,7 @@ function normalizeInvestorRecord(
   const notableInvestments = uniqueStrings(record.notableInvestments).slice(0, 6);
   const industryExpertise = uniqueStrings(record.industryExpertise).slice(0, 6);
   const email = optionalStringValue(record.email);
+  const phone = optionalStringValue(record.phone);
 
   return {
     id: `search-${provider}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -316,6 +317,7 @@ function normalizeInvestorRecord(
     stage: normalizeStage(stringValue(record.stage)),
     linkedinUrl: optionalStringValue(record.linkedinUrl) || undefined,
     email: email || undefined,
+    phone: phone || undefined,
     companyDomain: optionalStringValue(record.companyDomain) || undefined,
     sourceUrls,
     latestSummary: stringValue(record.latestSummary) || undefined,
@@ -384,6 +386,44 @@ function isLikelyIndividualInvestorRecord(record: Record<string, unknown>): bool
   }
 
   return true;
+}
+
+function isBusinessEmail(email: string): boolean {
+  if (!email) {
+    return false;
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const parts = normalized.split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return false;
+  }
+
+  const blockedDomains = new Set([
+    'gmail.com',
+    'googlemail.com',
+    'yahoo.com',
+    'hotmail.com',
+    'outlook.com',
+    'live.com',
+    'msn.com',
+    'icloud.com',
+    'me.com',
+    'mac.com',
+    'aol.com',
+    'proton.me',
+    'protonmail.com',
+    'pm.me',
+    'gmx.com',
+    'yandex.com',
+    'hey.com',
+  ]);
+
+  return !blockedDomains.has(parts[1]);
+}
+
+function hasRequiredBusinessContact(record: Record<string, unknown>): boolean {
+  return isBusinessEmail(optionalStringValue(record.email));
 }
 
 function stringValue(value: unknown): string {
@@ -792,8 +832,10 @@ Rules:
 4. Return only real individual investors or named decision-makers.
 5. Do not return firms, funds, syndicates, platforms, or organizations as results.
 6. Favor solo angels, individual angel investors, scouts, solo GPs, and named partners or principals.
-7. Include sourceUrls only from the URLs explicitly listed in the search documents.
-8. If email is not explicitly public in the search documents, return an empty string.
+7. Only return investors if a public business/work email is explicitly listed in the search documents.
+8. Exclude investors whose only email is personal/free or whose email is blank.
+9. Include sourceUrls only from the URLs explicitly listed in the search documents.
+10. If business email is not explicitly public in the search documents, do not return that investor.
 
 User search request:
 ${query}
@@ -823,6 +865,7 @@ ${searchBlock}`,
             stage: { type: Type.STRING },
             linkedinUrl: { type: Type.STRING },
             email: { type: Type.STRING },
+            phone: { type: Type.STRING },
             companyDomain: { type: Type.STRING },
             latestSummary: { type: Type.STRING },
             latestNews: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -839,6 +882,7 @@ ${searchBlock}`,
   const parsed = JSON.parse(response.text || '[]') as Array<Record<string, unknown>>;
   const investors = parsed
     .filter(isLikelyIndividualInvestorRecord)
+    .filter(hasRequiredBusinessContact)
     .slice(0, limit)
     .map((record) => normalizeInvestorRecord(record, provider));
   const sources = documents
@@ -878,11 +922,12 @@ Instructions:
 1. Prioritize investors whose thesis, portfolio, and recent public activity match the vault context.
 2. Prefer named individual investors such as angel investors, solo GPs, scouts, partners, principals, or managing partners.
 3. Do not invent investor details.
-4. Only include email if it is explicitly public.
+4. Only include a public business/work email.
 5. For each investor include sourceUrls from public sources used in grounding.
 6. Summarize latest news, pain points, and financial goals only if they are supported by recent public information.
 7. Do not return firms, funds, syndicates, or organizations as investor entries.
-8. Return concise research notes in plain text. Organize them by investor and include the supporting source URLs inline.`,
+8. Exclude any investor with no explicit business/work email or with only a personal/free email.
+9. Return concise research notes in plain text. Organize them by investor and include the supporting source URLs inline.`,
     config: {
       tools: [{ googleSearch: {} }],
     },
@@ -897,9 +942,10 @@ Instructions:
 Rules:
 1. Use only the grounded notes below.
 2. Do not invent investors, firms, emails, or source URLs.
-3. Only include email if it is explicitly public in the notes.
-4. Only return real individual investors, never firms or funds.
-5. Return a JSON array only.
+3. Only include a public business/work email that appears explicitly in the notes.
+4. Exclude any investor with no business/work email or with only a personal/free email.
+5. Only return real individual investors, never firms or funds.
+6. Return a JSON array only.
 
 Grounded notes:
 ${groundedResponse.text || ''}`,
@@ -923,6 +969,7 @@ ${groundedResponse.text || ''}`,
             stage: { type: Type.STRING },
             linkedinUrl: { type: Type.STRING },
             email: { type: Type.STRING },
+            phone: { type: Type.STRING },
             companyDomain: { type: Type.STRING },
             latestSummary: { type: Type.STRING },
             latestNews: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -937,7 +984,11 @@ ${groundedResponse.text || ''}`,
   });
 
   const parsed = JSON.parse(structuringResponse.text || '[]') as Array<Record<string, unknown>>;
-  const investors = parsed.filter(isLikelyIndividualInvestorRecord).slice(0, limit).map((record) =>
+  const investors = parsed
+    .filter(isLikelyIndividualInvestorRecord)
+    .filter(hasRequiredBusinessContact)
+    .slice(0, limit)
+    .map((record) =>
     normalizeInvestorRecord(
       {
         ...record,

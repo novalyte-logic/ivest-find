@@ -16,6 +16,7 @@ export interface Investor {
   stage: 'Pre-Seed' | 'Seed' | 'Series A' | 'Late Stage';
   linkedinUrl?: string;
   email?: string;
+  phone?: string;
   companyDomain?: string;
   sourceUrls?: string[];
   latestSummary?: string;
