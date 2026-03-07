@@ -78,6 +78,7 @@ export function InvestorFinder({
   const [webSearchResults, setWebSearchResults] = useState<Investor[]>([]);
   const [showWebSearchModal, setShowWebSearchModal] = useState(false);
   const [webSearchQuery, setWebSearchQuery] = useState('');
+  const [smartAssistQuery, setSmartAssistQuery] = useState('');
   const [importingIds, setImportingIds] = useState<Set<string>>(new Set());
   const [selectedWebResultIds, setSelectedWebResultIds] = useState<Set<string>>(new Set());
   const [contactLookupIds, setContactLookupIds] = useState<Set<string>>(new Set());
@@ -170,6 +171,27 @@ export function InvestorFinder({
     () => providerStatus?.contactProviders.filter((provider) => provider.implemented && provider.configured) || [],
     [providerStatus],
   );
+  const smartAssistSuggestions = useMemo(() => {
+    const base = normalizeSearchQuery(smartAssistQuery);
+    if (!base) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        [
+          base,
+          ...suggestedInvestorTypes.slice(0, 3).map((type) => `${base} ${type.toLowerCase()}`),
+          ...companyKeywords.slice(0, 3).map((keyword) => `${base} ${keyword.toLowerCase()} investors`),
+          ...suggestedSearchQueries.filter((query) =>
+            query.toLowerCase().includes(base.toLowerCase()),
+          ),
+        ]
+          .map((query) => normalizeSearchQuery(query))
+          .filter((query) => query && query.toLowerCase() !== base.toLowerCase()),
+      ),
+    ).slice(0, 6);
+  }, [companyKeywords, smartAssistQuery, suggestedInvestorTypes, suggestedSearchQueries]);
 
   const filteredInvestors = useMemo(() => {
     let result = investors.filter(inv => {
@@ -247,7 +269,12 @@ export function InvestorFinder({
   };
 
   const handleOpenSmartSearch = (query: string) => {
-    setWebSearchQuery(normalizeSearchQuery(query));
+    const normalizedQuery = normalizeSearchQuery(query);
+    if (!normalizedQuery) {
+      return;
+    }
+
+    setWebSearchQuery(normalizedQuery);
     setShowWebSearchModal(true);
   };
 
@@ -434,6 +461,57 @@ export function InvestorFinder({
           >
             Open Search
           </button>
+        </div>
+
+        <div className="mb-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+          <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
+            Smart Search Bar
+          </p>
+          <div className="flex flex-col gap-3 md:flex-row">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+              <input
+                type="text"
+                value={smartAssistQuery}
+                onChange={(event) => setSmartAssistQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    handleOpenSmartSearch(smartAssistQuery);
+                  }
+                }}
+                placeholder="Type a custom investor search and open it in the modal..."
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => handleOpenSmartSearch(smartAssistQuery)}
+              disabled={!normalizeSearchQuery(smartAssistQuery)}
+              className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-2.5 text-sm font-bold text-blue-300 transition-colors hover:bg-blue-500/20 disabled:opacity-40"
+            >
+              Open In Search
+            </button>
+          </div>
+
+          {smartAssistSuggestions.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                AI Smart Suggestions
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {smartAssistSuggestions.map((query) => (
+                  <button
+                    type="button"
+                    key={query}
+                    onClick={() => handleOpenSmartSearch(query)}
+                    className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
+                  >
+                    {query}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1.2fr,1fr]">
